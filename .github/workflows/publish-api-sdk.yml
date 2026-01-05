@@ -26,16 +26,17 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          server-id: github # Must match <id>github</id> in pom.xml distributionManagement
-          settings-path: ${{ github.workspace }}
+
+      - name: Create settings.xml
+        run: |
+          mkdir -p ~/.m2
+          echo "<settings><servers><server><id>github</id><username>${{ github.actor }}</username><password>${{ secrets.GITHUB_TOKEN }}</password></server></servers></settings>" > ~/.m2/settings.xml
 
       - name: Publish to GitHub Packages
         run: |
           # 先安装父 POM 到本地仓库
-          mvn install -DskipTests -s ${{ github.workspace }}/settings.xml
+          mvn install -DskipTests
           # 部署所有模块 (API, SDK等)
-          mvn deploy -DskipTests -s ${{ github.workspace }}/settings.xml
+          mvn deploy -DskipTests
         env:
-          # Use the built-in GITHUB_TOKEN which has write:packages permission
-          # mapped to the server-id 'github' via setup-java
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
