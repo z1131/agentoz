@@ -6,12 +6,12 @@
 
     <parent>
         <groupId>com.deepknow</groupId>
-        <artifactId>agent-nexus</artifactId>
+        <artifactId>agentoz</artifactId>
         <version>1.0.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>agent-nexus-api</artifactId>
-    <name>AgentNexus API</name>
+    <artifactId>agentoz-api</artifactId>
+    <name>AgentOZ API</name>
 
     <dependencies>
         <dependency>

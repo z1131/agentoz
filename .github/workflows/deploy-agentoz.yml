@@ -1,11 +1,11 @@
-name: Deploy Agent-Nexus (Production)
+name: Deploy AgentOZ (Production)
 
 on:
   push:
     branches: [main, master]
     paths:
-      - '.github/workflows/deploy-agent-nexus.yml'
-      - 'agent-nexus-service/**'
+      - '.github/workflows/deploy-agentoz.yml'
+      - 'agentoz-server/**'
       - 'pom.xml'
   workflow_dispatch:
 
@@ -14,8 +14,8 @@ permissions:
   packages: read  # 添加读取 packages 权限
 
 env:
-  IMAGE_NAME: agent-nexus
-  DEPLOY_DIR: /root/agent-nexus/agent-nexus-service
+  IMAGE_NAME: agentoz
+  DEPLOY_DIR: /root/agentoz/agentoz-server
   # Standardized ACR Configuration (Single Source of Truth)
   ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
   ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
@@ -39,7 +39,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .  # 改为项目根目录，因为 Dockerfile 需要访问所有模块
-          file: ./agent-nexus-service/Dockerfile
+          file: ./agentoz-server/Dockerfile
           push: true
           tags: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
           build-args: |
@@ -66,8 +66,8 @@ jobs:
           host: ${{ secrets[matrix.host_key] }}
           username: ${{ secrets[matrix.user_key] }}
           key: ${{ secrets[matrix.ssh_key_name] }}
-          source: "agent-nexus-service/docker-compose.prod.yml"
-          target: "/root/agent-nexus"
+          source: "agentoz-server/docker-compose.prod.yml"
+          target: "/root/agentoz"
 
       - name: Execute Deployment
         uses: appleboy/ssh-action@v1.0.3
@@ -88,7 +88,7 @@ jobs:
             # Prepare directory
             mkdir -p $DEPLOY_DIR
 
-            # The file is uploaded by scp to /root/agent-nexus/agent-nexus-service/docker-compose.prod.yml,
+            # The file is uploaded by scp to /root/agentoz/agentoz-server/docker-compose.prod.yml,
             # which is exactly where $DEPLOY_DIR is.
             cd $DEPLOY_DIR
 

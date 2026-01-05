@@ -6,18 +6,18 @@
 
     <parent>
         <groupId>com.deepknow</groupId>
-        <artifactId>agent-nexus</artifactId>
+        <artifactId>agentoz</artifactId>
         <version>1.0.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>agent-nexus-sdk</artifactId>
+    <artifactId>agentoz-starter</artifactId>
     <packaging>jar</packaging>
-    <name>AgentNexus SDK</name>
+    <name>AgentOZ Starter</name>
 
     <dependencies>
         <dependency>
             <groupId>com.deepknow</groupId>
-            <artifactId>agent-nexus-api</artifactId>
+            <artifactId>agentoz-api</artifactId>
             <version>${project.version}</version>
         </dependency>
 

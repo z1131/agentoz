@@ -5,17 +5,17 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.deepknow</groupId>
-    <artifactId>agent-nexus</artifactId>
+    <artifactId>agentoz</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <name>AgentNexus</name>
+    <name>AgentOZ</name>
     <description>企业级多智能体协同中枢</description>
 
     <modules>
-        <module>agent-nexus-api</module>
-        <module>agent-nexus-service</module>
-        <module>agent-nexus-sdk</module>
+        <module>agentoz-api</module>
+        <module>agentoz-server</module>
+        <module>agentoz-starter</module>
     </modules>
 
     <properties>
@@ -38,7 +38,7 @@
             <!-- 内部模块版本管理 -->
             <dependency>
                 <groupId>com.deepknow</groupId>
-                <artifactId>agent-nexus-api</artifactId>
+                <artifactId>agentoz-api</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>
@@ -48,12 +48,12 @@
         <repository>
             <id>github</id>
             <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/z1131/agentNexus</url>
+            <url>https://maven.pkg.github.com/z1131/agentoz</url>
         </repository>
         <snapshotRepository>
             <id>github</id>
             <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/z1131/agentNexus</url>
+            <url>https://maven.pkg.github.com/z1131/agentoz</url>
         </snapshotRepository>
     </distributionManagement>
 

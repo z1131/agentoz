@@ -1,11 +1,11 @@
-name: Publish agent-nexus-sdk
+name: Publish agentoz-starter
 
 on:
   push:
     branches: [main, master]
     paths:
       - '.github/workflows/publish-sdk.yml'
-      - 'agent-nexus-sdk/**'
+      - 'agentoz-starter/**'
       - 'pom.xml'
   workflow_dispatch:
 
@@ -28,11 +28,11 @@ jobs:
           server-id: github
           settings-path: ${{ github.workspace }}
 
-      - name: Publish agent-nexus-sdk to GitHub Packages
+      - name: Publish agentoz-starter to GitHub Packages
         run: |
           # 先安装父 POM 和依赖到本地仓库
           mvn install -DskipTests -s ${{ github.workspace }}/settings.xml
-          # 只发布 agent-nexus-sdk 模块
-          mvn deploy -DskipTests -s ${{ github.workspace }}/settings.xml -pl agent-nexus-sdk
+          # 只发布 agentoz-starter 模块
+          mvn deploy -DskipTests -s ${{ github.workspace }}/settings.xml -pl agentoz-starter
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
