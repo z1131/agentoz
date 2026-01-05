@@ -10,13 +10,13 @@ RUN mkdir -p /root/.m2 && \
 # 复制整个项目进行构建
 COPY . .
 
-# 构建 service 及其依赖模块 (如 agent-nexus-api)
-RUN mvn clean package -DskipTests -pl agent-nexus-service -am
+# 构建 service 及其依赖模块 (如 agentoz-api)
+RUN mvn clean package -DskipTests -pl agentoz-server -am
 
 # Stage 2: Run
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
-COPY --from=build /app/agent-nexus-service/target/*.jar app.jar
+COPY --from=build /app/agentoz-server/target/*.jar app.jar
 ENV TZ=Asia/Shanghai
 EXPOSE 8003 20883
 # Force deployment trigger

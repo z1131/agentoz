@@ -1,8 +1,8 @@
 version: '3.8'
 services:
-  agent-nexus:
+  agentoz:
     image: ${DOCKER_IMAGE}
-    container_name: agent-nexus
+    container_name: agentoz
     restart: unless-stopped
     env_file:
       - /etc/deepknow.env

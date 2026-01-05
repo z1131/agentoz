@@ -19,9 +19,9 @@ AgentNexus 遵循“中枢化管控、分布式协同”的设计理念：
 
 | 模块 | 描述 |
 | :--- | :--- |
-| `agent-nexus-api` | **契约包**：公共 DTO、枚举及 Dubbo 接口定义。 |
-| `agent-nexus-service` | **服务端**：业务逻辑核心、gRPC 客户端、数据库与 Redis 存储层。 |
-| `agent-nexus-sdk` | **集成包**：业务系统接入平台的标准工具库。 |
+| `agentoz-api` | **契约包**：公共 DTO、枚举及 Dubbo 接口定义。 |
+| `agentoz-server` | **服务端**：业务逻辑核心、gRPC 客户端、数据库与 Redis 存储层。 |
+| `agentoz-starter` | **集成包**：业务系统接入平台的标准工具库。 |
 
 ---
 
