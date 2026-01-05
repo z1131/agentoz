@@ -1,4 +1,4 @@
-name: Publish agent-nexus-api & agent-nexus-sdk
+name: Publish agent-nexus-api
 
 on:
   push:
@@ -6,7 +6,6 @@ on:
     paths:
       - '.github/workflows/publish-api-sdk.yml'
       - 'agent-nexus-api/**'
-      - 'agent-nexus-sdk/**'
       - 'pom.xml'
   workflow_dispatch:
 
@@ -33,8 +32,8 @@ jobs:
         run: |
           # 先安装父 POM 到本地仓库
           mvn install -DskipTests -s ${{ github.workspace }}/settings.xml
-          # 再部署 api 和 sdk
-          mvn deploy -DskipTests -s ${{ github.workspace }}/settings.xml
+          # 只部署 api 模块（sdk 模块有循环依赖问题，暂时不发包）
+          mvn deploy -DskipTests -s ${{ github.workspace }}/settings.xml -pl agent-nexus-api
         env:
           # Use the built-in GITHUB_TOKEN which has write:packages permission
           # mapped to the server-id 'github' via setup-java
