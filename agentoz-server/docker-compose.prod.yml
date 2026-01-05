@@ -14,7 +14,6 @@ services:
       JAVA_OPTS: "-Xms512m -Xmx1024m"
       SERVER_PORT: 8003
       SPRING_PROFILES_ACTIVE: "prod"
-      # 动态获取本机 IP，用于 Dubbo 注册（在部署脚本中设置）
       DUBBO_IP_TO_REGISTRY: ${SERVICE_IP}
     volumes:
       - ./logs:/root/logs
