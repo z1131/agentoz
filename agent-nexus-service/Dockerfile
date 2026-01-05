@@ -7,15 +7,11 @@ ARG GITHUB_TOKEN
 RUN mkdir -p /root/.m2 && \
     echo "<settings><servers><server><id>github</id><username>\${env.GITHUB_ACTOR}</username><password>\${env.GITHUB_TOKEN}</password></server></servers></settings>" > /root/.m2/settings.xml
 
-# 复制父 POM 和 service 模块
-COPY pom.xml .
-COPY agent-nexus-service/pom.xml ./agent-nexus-service/
-COPY agent-nexus-service/src ./agent-nexus-service/src
+# 复制整个项目进行构建
+COPY . .
 
-# 先安装父 POM 到本地仓库，再构建 service
-RUN mvn install:install-file -Dfile=pom.xml -DpomFile=pom.xml && \
-    cd agent-nexus-service && \
-    mvn clean package -DskipTests
+# 构建 service 及其依赖模块 (如 agent-nexus-api)
+RUN mvn clean package -DskipTests -pl agent-nexus-service -am
 
 # Stage 2: Run
 FROM eclipse-temurin:17-jre-jammy
