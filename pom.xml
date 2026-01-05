@@ -35,6 +35,25 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- 内部模块版本管理 -->
+            <dependency>
+                <groupId>com.deepknow</groupId>
+                <artifactId>agent-nexus-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/z1131/agent-nexus</url>
+        </repository>
+        <snapshotRepository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/z1131/agent-nexus</url>
+        </snapshotRepository>
+    </distributionManagement>
 </project>

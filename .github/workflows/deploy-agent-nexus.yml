@@ -1,0 +1,111 @@
+name: Deploy Agent-Nexus (Production)
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - '.github/workflows/deploy-agent-nexus.yml'
+      - 'agent-nexus-service/**'
+      - 'pom.xml'
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: agent-nexus
+  DEPLOY_DIR: /root/agent-nexus/agent-nexus-service
+  # Standardized ACR Configuration (Single Source of Truth)
+  ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+  ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+  ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+  ACR_NAMESPACE: ${{ secrets.ACR_NAMESPACE }}
+
+jobs:
+  build_and_push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ env.ACR_USERNAME }}
+          password: ${{ env.ACR_PASSWORD }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .  # 改为项目根目录，因为 Dockerfile 需要访问所有模块
+          file: ./agent-nexus-service/Dockerfile
+          push: true
+          tags: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+
+  deploy:
+    needs: build_and_push
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - host_key: ECS_1_HOST
+            user_key: ECS_1_USER
+            ssh_key_name: ECS_1_SSH_PRIVATE_KEY
+          - host_key: ECS_2_HOST
+            user_key: ECS_2_USER
+            ssh_key_name: ECS_2_SSH_PRIVATE_KEY
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload Compose File
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets[matrix.host_key] }}
+          username: ${{ secrets[matrix.user_key] }}
+          key: ${{ secrets[matrix.ssh_key_name] }}
+          source: "agent-nexus-service/docker-compose.prod.yml"
+          target: "/root/agent-nexus"
+
+      - name: Execute Deployment
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          ACR_REGISTRY: ${{ env.ACR_REGISTRY }}
+          ACR_USERNAME: ${{ env.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ env.ACR_PASSWORD }}
+          DOCKER_IMAGE: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+          DEPLOY_DIR: ${{ env.DEPLOY_DIR }}
+        with:
+          host: ${{ secrets[matrix.host_key] }}
+          username: ${{ secrets[matrix.user_key] }}
+          key: ${{ secrets[matrix.ssh_key_name] }}
+          envs: ACR_REGISTRY,ACR_USERNAME,ACR_PASSWORD,DOCKER_IMAGE,DEPLOY_DIR
+          script: |
+            set -e
+
+            # Prepare directory
+            mkdir -p $DEPLOY_DIR
+
+            # The file is uploaded by scp to /root/agent-nexus/agent-nexus-service/docker-compose.prod.yml,
+            # which is exactly where $DEPLOY_DIR is.
+            cd $DEPLOY_DIR
+
+            if [ ! -f "docker-compose.prod.yml" ]; then
+              echo "Error: docker-compose.prod.yml not found in $DEPLOY_DIR"
+              exit 1
+            fi
+
+            # Login to ACR
+            echo "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" -u "$ACR_USERNAME" --password-stdin
+
+            # Export variables for docker-compose
+            export DOCKER_IMAGE=$DOCKER_IMAGE
+            export SERVICE_IP=$(hostname -I | awk '{print $1}')
+
+            echo "------------------------------------------------"
+            echo "Deploying Image: $DOCKER_IMAGE"
+            echo "Service IP: $SERVICE_IP"
+            echo "------------------------------------------------"
+
+            # Pull and Restart
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml down --remove-orphans || true
+            docker compose -f docker-compose.prod.yml up -d
+
+            docker image prune -f || true
