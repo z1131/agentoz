@@ -31,8 +31,8 @@ jobs:
       - name: Publish agent-nexus-api to GitHub Packages
         run: |
           # 先安装父 POM 到本地仓库
-          mvn install -DskipTests
+          mvn install -DskipTests -s ${{ github.workspace }}/settings.xml
           # 只发布 agent-nexus-api 模块
-          mvn deploy -DskipTests -pl agent-nexus-api
+          mvn deploy -DskipTests -s ${{ github.workspace }}/settings.xml -pl agent-nexus-api
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
