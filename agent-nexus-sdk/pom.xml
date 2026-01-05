@@ -11,11 +11,29 @@
     </parent>
 
     <artifactId>agent-nexus-sdk</artifactId>
-    <packaging>pom</packaging>
-    <name>AgentNexus SDK Project</name>
+    <packaging>jar</packaging>
+    <name>AgentNexus SDK</name>
 
-    <modules>
-        <module>agent-nexus-sdk-api</module>
-        <module>agent-nexus-sdk-core</module>
-    </modules>
+    <dependencies>
+        <dependency>
+            <groupId>com.deepknow</groupId>
+            <artifactId>agent-nexus-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo-spring-boot-starter</artifactId>
+            <version>${dubbo.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+        </dependency>
+    </dependencies>
 </project>

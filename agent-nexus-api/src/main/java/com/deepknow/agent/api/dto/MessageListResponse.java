@@ -1,27 +1,45 @@
 package com.deepknow.agent.api.dto;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
 import java.io.Serializable;
 import java.util.List;
 
-/**
- * 消息列表响应
- */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 public class MessageListResponse implements Serializable {
-
-    private static final long serialVersionUID = 1L;
-
     private List<MessageDTO> messages;
+    private long total;
 
-    private Integer total;
+    public MessageListResponse() {}
 
-    private String sessionId;
+    public MessageListResponse(List<MessageDTO> messages, long total) {
+        this.messages = messages;
+        this.total = total;
+    }
+
+    public List<MessageDTO> getMessages() { return messages; }
+    public void setMessages(List<MessageDTO> messages) { this.messages = messages; }
+
+    public long getTotal() { return total; }
+    public void setTotal(long total) { this.total = total; }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static class Builder {
+        private List<MessageDTO> messages;
+        private long total;
+
+        public Builder messages(List<MessageDTO> messages) {
+            this.messages = messages;
+            return this;
+        }
+
+        public Builder total(long total) {
+            this.total = total;
+            return this;
+        }
+
+        public MessageListResponse build() {
+            return new MessageListResponse(messages, total);
+        }
+    }
 }

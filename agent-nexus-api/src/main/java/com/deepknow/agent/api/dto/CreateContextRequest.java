@@ -1,30 +1,45 @@
 package com.deepknow.agent.api.dto;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-import jakarta.validation.constraints.NotBlank;
 import java.io.Serializable;
-import java.util.Map;
+import java.util.List;
 
-/**
- * 创建上下文请求
- */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 public class CreateContextRequest implements Serializable {
-
-    private static final long serialVersionUID = 1L;
-
-    @NotBlank(message = "会话ID不能为空")
     private String sessionId;
+    private List<ContextData> contextData;
 
-    @NotBlank(message = "租户ID不能为空")
-    private String tenantId;
+    public CreateContextRequest() {}
 
-    private Map<String, Object> initialData;
+    public CreateContextRequest(String sessionId, List<ContextData> contextData) {
+        this.sessionId = sessionId;
+        this.contextData = contextData;
+    }
+
+    public String getSessionId() { return sessionId; }
+    public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+
+    public List<ContextData> getContextData() { return contextData; }
+    public void setContextData(List<ContextData> contextData) { this.contextData = contextData; }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static class Builder {
+        private String sessionId;
+        private List<ContextData> contextData;
+
+        public Builder sessionId(String sessionId) {
+            this.sessionId = sessionId;
+            return this;
+        }
+
+        public Builder contextData(List<ContextData> contextData) {
+            this.contextData = contextData;
+            return this;
+        }
+
+        public CreateContextRequest build() {
+            return new CreateContextRequest(sessionId, contextData);
+        }
+    }
 }

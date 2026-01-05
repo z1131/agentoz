@@ -1,34 +1,67 @@
 package com.deepknow.agent.api.dto;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
 import java.io.Serializable;
-import java.time.LocalDateTime;
 import java.util.Map;
 
-/**
- * 上下文DTO
- */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 public class ContextDTO implements Serializable {
+    private String id;
+    private String key;
+    private Object value;
+    private Map<String, Object> metadata;
 
-    private static final long serialVersionUID = 1L;
+    public ContextDTO() {}
 
-    private String contextId;
+    public ContextDTO(String id, String key, Object value, Map<String, Object> metadata) {
+        this.id = id;
+        this.key = key;
+        this.value = value;
+        this.metadata = metadata;
+    }
 
-    private String sessionId;
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
 
-    private String tenantId;
+    public String getKey() { return key; }
+    public void setKey(String key) { this.key = key; }
 
-    private Map<String, Object> data;
+    public Object getValue() { return value; }
+    public void setValue(Object value) { this.value = value; }
 
-    private LocalDateTime createdAt;
+    public Map<String, Object> getMetadata() { return metadata; }
+    public void setMetadata(Map<String, Object> metadata) { this.metadata = metadata; }
 
-    private LocalDateTime updatedAt;
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static class Builder {
+        private String id;
+        private String key;
+        private Object value;
+        private Map<String, Object> metadata;
+
+        public Builder id(String id) {
+            this.id = id;
+            return this;
+        }
+
+        public Builder key(String key) {
+            this.key = key;
+            return this;
+        }
+
+        public Builder value(Object value) {
+            this.value = value;
+            return this;
+        }
+
+        public Builder metadata(Map<String, Object> metadata) {
+            this.metadata = metadata;
+            return this;
+        }
+
+        public ContextDTO build() {
+            return new ContextDTO(id, key, value, metadata);
+        }
+    }
 }
