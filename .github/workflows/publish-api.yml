@@ -28,35 +28,6 @@ jobs:
           server-id: github
           settings-path: ${{ github.workspace }}
 
-      - name: Create settings.xml
-        run: |
-          mkdir -p ~/.m2
-          cat > ~/.m2/settings.xml << 'EOF'
-          <settings>
-            <servers>
-              <server>
-                <id>github</id>
-                <username>${{ github.actor }}</username>
-                <password>${{ secrets.GITHUB_TOKEN }}</password>
-              </server>
-            </servers>
-            <profiles>
-              <profile>
-                <id>github</id>
-                <repositories>
-                  <repository>
-                    <id>github</id>
-                    <url>https://maven.pkg.github.com/z1131/agent-nexus</url>
-                  </repository>
-                </repositories>
-              </profile>
-            </profiles>
-            <activeProfiles>
-              <activeProfile>github</activeProfile>
-            </activeProfiles>
-          </settings>
-          EOF
-
       - name: Publish agent-nexus-api to GitHub Packages
         run: |
           # 先安装父 POM 到本地仓库
