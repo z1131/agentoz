@@ -9,6 +9,10 @@ on:
       - 'pom.xml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: read  # 添加读取 packages 权限
+
 env:
   IMAGE_NAME: agent-nexus
   DEPLOY_DIR: /root/agent-nexus/agent-nexus-service
