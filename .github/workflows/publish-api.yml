@@ -32,8 +32,8 @@ jobs:
         run: |
           # 先安装父 POM 到本地仓库
           mvn install -DskipTests -s ${{ github.workspace }}/settings.xml
-          # 只部署 api 模块（sdk 模块有循环依赖问题，暂时不发包）
-          mvn deploy -DskipTests -s ${{ github.workspace }}/settings.xml -pl agent-nexus-api
+          # 部署所有模块 (API, SDK等)
+          mvn deploy -DskipTests -s ${{ github.workspace }}/settings.xml
         env:
           # Use the built-in GITHUB_TOKEN which has write:packages permission
           # mapped to the server-id 'github' via setup-java
