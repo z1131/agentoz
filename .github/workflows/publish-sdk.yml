@@ -31,7 +31,31 @@ jobs:
       - name: Create settings.xml
         run: |
           mkdir -p ~/.m2
-          echo "<settings><servers><server><id>github</id><username>${{ github.actor }}</username><password>${{ secrets.GITHUB_TOKEN }}</password></server></servers></settings>" > ~/.m2/settings.xml
+          cat > ~/.m2/settings.xml << 'EOF'
+<settings>
+  <servers>
+    <server>
+      <id>github</id>
+      <username>${{ github.actor }}</username>
+      <password>${{ secrets.GITHUB_TOKEN }}</password>
+    </server>
+  </servers>
+  <profiles>
+    <profile>
+      <id>github</id>
+      <repositories>
+        <repository>
+          <id>github</id>
+          <url>https://maven.pkg.github.com/z1131/agent-nexus</url>
+        </repository>
+      </repositories>
+    </profile>
+  </profiles>
+  <activeProfiles>
+    <activeProfile>github</activeProfile>
+  </activeProfiles>
+</settings>
+EOF
 
       - name: Publish agent-nexus-sdk to GitHub Packages
         run: |
