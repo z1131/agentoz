@@ -38,6 +38,8 @@ jobs:
           file: ./agent-nexus-service/Dockerfile
           push: true
           tags: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
 
   deploy:
     needs: build_and_push

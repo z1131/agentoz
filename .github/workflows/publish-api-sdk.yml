@@ -29,8 +29,12 @@ jobs:
           server-id: github # Must match <id>github</id> in pom.xml distributionManagement
           settings-path: ${{ github.workspace }}
 
-      - name: Publish agent-nexus-api and agent-nexus-sdk
-        run: mvn clean deploy -DskipTests -s ${{ github.workspace }}/settings.xml
+      - name: Publish to GitHub Packages
+        run: |
+          # 先安装父 POM 到本地仓库
+          mvn install -DskipTests -s ${{ github.workspace }}/settings.xml
+          # 再部署 api 和 sdk
+          mvn deploy -DskipTests -s ${{ github.workspace }}/settings.xml
         env:
           # Use the built-in GITHUB_TOKEN which has write:packages permission
           # mapped to the server-id 'github' via setup-java
