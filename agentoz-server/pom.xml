@@ -38,6 +38,19 @@
             <version>${dubbo.version}</version>
         </dependency>
 
+        <!-- Nacos Client (Dubbo Config Center 需要) -->
+        <dependency>
+            <groupId>com.alibaba.nacos</groupId>
+            <artifactId>nacos-client</artifactId>
+            <version>2.3.0</version>
+        </dependency>
+
+        <!-- Spring Cloud Alibaba Nacos Config (可选,提供更好的集成) -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-netty-shaded</artifactId>
