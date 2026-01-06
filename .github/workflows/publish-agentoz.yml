@@ -27,6 +27,26 @@ jobs:
           mkdir -p ~/.m2
           cat > ~/.m2/settings.xml <<EOF
           <settings>
+            <mirrors>
+              <mirror>
+                <id>aliyun-central</id>
+                <name>Aliyun Central</name>
+                <url>https://maven.aliyun.com/repository/central</url>
+                <mirrorOf>central</mirrorOf>
+              </mirror>
+              <mirror>
+                <id>aliyun-public</id>
+                <name>Aliyun Public</name>
+                <url>https://maven.aliyun.com/repository/public</url>
+                <mirrorOf>*</mirrorOf>
+              </mirror>
+              <mirror>
+                <id>aliyun-spring</id>
+                <name>Aliyun Spring</name>
+                <url>https://maven.aliyun.com/repository/spring</url>
+                <mirrorOf>spring</mirrorOf>
+              </mirror>
+            </mirrors>
             <servers>
               <server>
                 <id>github-agentoz</id>

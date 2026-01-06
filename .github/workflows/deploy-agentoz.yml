@@ -109,8 +109,9 @@ jobs:
             echo "------------------------------------------------"
 
             # Pull and Restart - 先 down 再 pull,避免资源竞争
-            docker compose -f docker-compose.prod.yml down --remove-orphans || true
-            docker compose -f docker-compose.prod.yml pull
+            # 每个命令都需要传入环境变量
+            DOCKER_IMAGE=$DOCKER_IMAGE SERVICE_IP=$SERVICE_IP docker compose -f docker-compose.prod.yml down --remove-orphans || true
+            DOCKER_IMAGE=$DOCKER_IMAGE SERVICE_IP=$SERVICE_IP docker compose -f docker-compose.prod.yml pull
             DOCKER_IMAGE=$DOCKER_IMAGE SERVICE_IP=$SERVICE_IP docker compose -f docker-compose.prod.yml up -d
 
             docker image prune -f || true
