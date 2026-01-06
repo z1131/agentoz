@@ -29,12 +29,11 @@ jobs:
       - name: Create settings.xml
         run: |
           mkdir -p ~/.m2
-          echo "<settings><servers><server><id>github</id><username>${{ github.actor }}</username><password>${{ secrets.PACKAGES_DEPLOY_TOKEN }}</password></server></servers></settings>" > ~/.m2/settings.xml
+          echo "<settings><servers><server><id>github</id><username>${{ github.actor }}</username><password>${{ secrets.GITHUB_TOKEN }}</password></server></servers></settings>" > ~/.m2/settings.xml
 
       - name: Publish to GitHub Packages
         run: |
-          # 运行全量部署，确保父 POM 和所有子模块 (starter等) 一起发布
-          # 排除 server 模块发布（如果不需要），但目前建议全量
-          mvn deploy -DskipTests
+          # 运行全量部署，确保父 POM 和所有子模块一起发布
+          mvn clean deploy -DskipTests
         env:
-          GITHUB_TOKEN: ${{ secrets.PACKAGES_DEPLOY_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
