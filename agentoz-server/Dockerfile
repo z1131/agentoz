@@ -9,6 +9,14 @@ RUN --mount=type=secret,id=github_token \
     mkdir -p /root/.m2 && \
     cat > /root/.m2/settings.xml <<EOF
 <settings>
+  <mirrors>
+      <mirror>
+        <id>aliyunmaven</id>
+        <mirrorOf>*</mirrorOf>
+        <name>阿里云公共仓库</name>
+        <url>https://maven.aliyun.com/repository/public</url>
+      </mirror>
+  </mirrors>
   <servers>
     <server>
       <id>github-agentoz</id>
