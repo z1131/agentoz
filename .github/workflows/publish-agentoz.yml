@@ -4,9 +4,9 @@ on:
   push:
     branches: [main, master]
     paths:
-      - 'agentoz-api/**'
       - 'agentoz-starter/**'
       - 'pom.xml'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
