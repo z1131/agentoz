@@ -20,6 +20,7 @@
     <description>企业级多智能体协同中枢</description>
 
     <modules>
+        <module>agentoz-api</module>
         <module>agentoz-server</module>
         <module>agentoz-starter</module>
     </modules>

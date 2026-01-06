@@ -56,6 +56,6 @@ jobs:
             </servers>
           </settings>
           EOF
-          mvn clean deploy -DskipTests -pl .,agentoz-starter -s ~/.m2/settings.xml --batch-mode
+          mvn clean deploy -DskipTests -pl .,agentoz-api,agentoz-starter -s ~/.m2/settings.xml --batch-mode
         env:
           GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN }}

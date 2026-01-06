@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/deploy-agentoz.yml'
       - 'agentoz-server/**'
+      - 'agentoz-api/**'
+      - 'agentoz-starter/**'
       - 'pom.xml'
   workflow_dispatch:
 
