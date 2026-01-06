@@ -70,6 +70,7 @@ jobs:
           key: ${{ secrets[matrix.ssh_key_name] }}
           source: "agentoz-server/docker-compose.prod.yml"
           target: "/root/agentoz"
+          strip_components: 1
 
       - name: Execute Deployment
         uses: appleboy/ssh-action@v1.0.3
@@ -90,8 +91,8 @@ jobs:
             # Prepare directory
             mkdir -p $DEPLOY_DIR
 
-            # The file is uploaded by scp to /root/agentoz/agentoz-server/docker-compose.prod.yml,
-            # which is exactly where $DEPLOY_DIR is.
+            # The file is uploaded by scp to /root/agentoz/docker-compose.prod.yml
+            # due to strip_components: 1
             cd $DEPLOY_DIR
 
             if [ ! -f "docker-compose.prod.yml" ]; then
