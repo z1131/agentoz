@@ -90,9 +90,6 @@ jobs:
 
             # Prepare directory
             mkdir -p $DEPLOY_DIR
-
-            # The file is uploaded by scp to /root/agentoz/docker-compose.prod.yml
-            # due to strip_components: 1
             cd $DEPLOY_DIR
 
             if [ ! -f "docker-compose.prod.yml" ]; then
@@ -103,18 +100,17 @@ jobs:
             # Login to ACR
             echo "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" -u "$ACR_USERNAME" --password-stdin
 
-            # Export variables for docker-compose
-            export DOCKER_IMAGE=$DOCKER_IMAGE
-            export SERVICE_IP=$(hostname -I | awk '{print $1}')
+            # Get service IP
+            SERVICE_IP=$(hostname -I | awk '{print $1}')
 
             echo "------------------------------------------------"
             echo "Deploying Image: $DOCKER_IMAGE"
             echo "Service IP: $SERVICE_IP"
             echo "------------------------------------------------"
 
-            # Pull and Restart
-            docker compose -f docker-compose.prod.yml pull
+            # Pull and Restart - 先 down 再 pull,避免资源竞争
             docker compose -f docker-compose.prod.yml down --remove-orphans || true
-            docker compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.prod.yml pull
+            DOCKER_IMAGE=$DOCKER_IMAGE SERVICE_IP=$SERVICE_IP docker compose -f docker-compose.prod.yml up -d
 
             docker image prune -f || true
