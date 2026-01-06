@@ -29,6 +29,7 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- Spring Boot BOM (The Modern Way) -->
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
@@ -36,8 +37,6 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-
-            <!-- Spring Cloud BOM -->
             <dependency>
                 <groupId>org.springframework.cloud</groupId>
                 <artifactId>spring-cloud-dependencies</artifactId>
@@ -45,8 +44,6 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-
-            <!-- Spring Cloud Alibaba BOM -->
             <dependency>
                 <groupId>com.alibaba.cloud</groupId>
                 <artifactId>spring-cloud-alibaba-dependencies</artifactId>
@@ -54,15 +51,22 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-
-            <!-- 内部模块版本管理 -->
             <dependency>
                 <groupId>com.deepknow</groupId>
-                <artifactId>agentoz-api</artifactId>
+                <artifactId>agentoz-starter</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <repositories>
+        <!-- 明确中央仓库，但不分配特殊 ID -->
+        <repository>
+            <id>central</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+            <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+    </repositories>
 
     <distributionManagement>
         <repository>

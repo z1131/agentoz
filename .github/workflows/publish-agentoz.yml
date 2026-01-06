@@ -3,10 +3,6 @@ name: Publish AgentOz Starter (SDK)
 on:
   push:
     branches: [main, master]
-    paths:
-      - 'agentoz-starter/**'
-      - 'pom.xml'
-      - '.github/workflows/publish-agentoz.yml'
   workflow_dispatch:
 
 jobs:
@@ -26,14 +22,22 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Create settings.xml
+      - name: Build and Deploy (The Clean Way)
         run: |
           mkdir -p ~/.m2
-          echo "<settings><servers><server><id>github-agentoz</id><username>${{ github.actor }}</username><password>${{ secrets.PACKAGES_TOKEN }}</password></server></servers></settings>" > ~/.m2/settings.xml
-
-      - name: Publish to GitHub Packages
-        run: |
-          # 仅发布父 POM (.) 和 starter 模块，彻底跳过 server
-          mvn clean deploy -DskipTests -pl .,agentoz-starter
+          # 关键：settings.xml 只给私有 ID 喂钥匙，绝不定义 <mirror> 或触碰 central
+          cat > ~/.m2/settings.xml <<EOF
+          <settings>
+            <servers>
+              <server>
+                <id>github-agentoz</id>
+                <username>${{ github.actor }}</username>
+                <password>${{ secrets.PACKAGES_TOKEN }}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+          # 明确指定使用该 settings 构建，并只发包指定的模块
+          mvn clean deploy -DskipTests -pl .,agentoz-starter -s ~/.m2/settings.xml --batch-mode
         env:
           GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
