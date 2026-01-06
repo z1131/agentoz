@@ -16,7 +16,7 @@
     <dependencies>
         <dependency>
             <groupId>com.deepknow</groupId>
-            <artifactId>agentoz-api</artifactId>
+            <artifactId>agentoz-starter</artifactId>
             <version>${project.version}</version>
         </dependency>
 
