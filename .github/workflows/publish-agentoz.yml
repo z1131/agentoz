@@ -29,11 +29,11 @@ jobs:
       - name: Create settings.xml
         run: |
           mkdir -p ~/.m2
-          echo "<settings><servers><server><id>github-agentoz</id><username>${{ github.actor }}</username><password>${{ secrets.GITHUB_TOKEN }}</password></server></servers></settings>" > ~/.m2/settings.xml
+          echo "<settings><servers><server><id>github</id><username>${{ github.actor }}</username><password>${{ secrets.PACKAGES_TOKEN }}</password></server></servers></settings>" > ~/.m2/settings.xml
 
       - name: Publish to GitHub Packages
         run: |
           # 仅发布父 POM (.) 和 starter 模块，彻底跳过 server
           mvn clean deploy -DskipTests -pl .,agentoz-starter
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN }}

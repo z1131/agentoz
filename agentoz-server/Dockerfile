@@ -10,7 +10,7 @@ RUN --mount=type=secret,id=github_token \
 <settings>
   <servers>
     <server>
-      <id>github-agentoz</id>
+      <id>github</id>
       <username>${GITHUB_ACTOR}</username>
       <password>$(cat /run/secrets/github_token)</password>
     </server>

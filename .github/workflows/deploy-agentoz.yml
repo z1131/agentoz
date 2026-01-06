@@ -45,7 +45,7 @@ jobs:
           build-args: |
             GITHUB_ACTOR=${{ github.actor }}
           secrets: |
-            github_token=${{ secrets.PACKAGES_DEPLOY_TOKEN }}
+            github_token=${{ secrets.PACKAGES_TOKEN }}
 
   deploy:
     needs: build_and_push
