@@ -34,13 +34,7 @@ public class AgentStarterAutoConfiguration {
         return new AgentContext();
     }
     
-    /**
-     * 将 Dubbo Reference 包装成一个 Spring Bean，方便 AgentContext 获取
-     */
-    @Bean
-    public AgentService agentServiceBean() {
-        return agentService;
-    }
+
 
     /**
      * 注册工具扫描器
