@@ -9,6 +9,13 @@
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.1</version>
+        <relativePath/>
+    </parent>
+
     <name>AgentOZ</name>
     <description>企业级多智能体协同中枢</description>
 
@@ -19,9 +26,6 @@
 
     <properties>
         <java.version>17</java.version>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
-        <spring-boot.version>3.2.1</spring-boot.version>
         <dubbo.version>3.2.5</dubbo.version>
         <spring-cloud.version>2023.0.3</spring-cloud.version>
         <spring-cloud-alibaba.version>2023.0.1.2</spring-cloud-alibaba.version>
@@ -29,14 +33,6 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Spring Boot BOM (The Modern Way) -->
-            <dependency>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-dependencies</artifactId>
-                <version>${spring-boot.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
             <dependency>
                 <groupId>org.springframework.cloud</groupId>
                 <artifactId>spring-cloud-dependencies</artifactId>
@@ -59,39 +55,10 @@
         </dependencies>
     </dependencyManagement>
 
-    <repositories>
-        <!-- 明确中央仓库，但不分配特殊 ID -->
-        <repository>
-            <id>central</id>
-            <url>https://repo.maven.apache.org/maven2</url>
-            <snapshots><enabled>false</enabled></snapshots>
-        </repository>
-    </repositories>
-
     <distributionManagement>
         <repository>
             <id>github-agentoz</id>
-            <name>GitHub Packages</name>
             <url>https://maven.pkg.github.com/z1131/agentoz</url>
         </repository>
-        <snapshotRepository>
-            <id>github-agentoz</id>
-            <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/z1131/agentoz</url>
-        </snapshotRepository>
     </distributionManagement>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
-                <configuration>
-                    <source>${java.version}</source>
-                    <target>${java.version}</target>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
 </project>

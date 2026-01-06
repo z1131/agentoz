@@ -22,10 +22,9 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Build and Deploy (The Clean Way)
+      - name: Build and Deploy (The Simple Way)
         run: |
           mkdir -p ~/.m2
-          # 关键：settings.xml 只给私有 ID 喂钥匙，绝不定义 <mirror> 或触碰 central
           cat > ~/.m2/settings.xml <<EOF
           <settings>
             <servers>
@@ -37,7 +36,6 @@ jobs:
             </servers>
           </settings>
           EOF
-          # 明确指定使用该 settings 构建，并只发包指定的模块
           mvn clean deploy -DskipTests -pl .,agentoz-starter -s ~/.m2/settings.xml --batch-mode
         env:
           GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
