@@ -1,4 +1,4 @@
-name: Publish AgentOz (Full Bundle)
+name: Publish AgentOz Starter (SDK)
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
     paths:
       - 'agentoz-starter/**'
       - 'pom.xml'
-      - '.github/workflows/**'
+      - '.github/workflows/publish-agentoz.yml'
   workflow_dispatch:
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
 
       - name: Publish to GitHub Packages
         run: |
-          # 运行全量部署，确保父 POM 和所有子模块一起发布
-          mvn clean deploy -DskipTests
+          # 仅发布父 POM (.) 和 starter 模块，彻底跳过 server
+          mvn clean deploy -DskipTests -pl .,agentoz-starter
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
