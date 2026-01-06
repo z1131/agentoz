@@ -2,16 +2,27 @@
 FROM maven:3.9.6-eclipse-temurin-17 AS build
 WORKDIR /app
 
-# 配置 GitHub Packages 认证（从 GitHub Packages 拉取依赖）
-ARG GITHUB_TOKEN
-RUN mkdir -p /root/.m2 && \
-    echo "<settings><servers><server><id>github</id><username>\${env.GITHUB_ACTOR}</username><password>\${env.GITHUB_TOKEN}</password></server></servers></settings>" > /root/.m2/settings.xml
+# 准备 Maven settings，使用 BuildKit secret 注入 GitHub Packages token
+ARG GITHUB_ACTOR
+RUN --mount=type=secret,id=github_token \
+    mkdir -p /root/.m2 && \
+    cat > /root/.m2/settings.xml <<EOF
+<settings>
+  <servers>
+    <server>
+      <id>github</id>
+      <username>${GITHUB_ACTOR}</username>
+      <password>$(cat /run/secrets/github_token)</password>
+    </server>
+  </servers>
+</settings>
+EOF
 
 # 复制整个项目进行构建
 COPY . .
 
-# 构建 service 及其依赖模块 (如 agentoz-api)
-RUN mvn clean package -DskipTests -pl agentoz-server -am
+# 构建 service 及其依赖模块 (如 agentoz-starter)
+RUN --mount=type=secret,id=github_token mvn clean package -DskipTests -pl agentoz-server -am
 
 # Stage 2: Run
 FROM eclipse-temurin:17-jre-jammy

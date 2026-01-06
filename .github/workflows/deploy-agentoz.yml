@@ -43,7 +43,9 @@ jobs:
           push: true
           tags: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
           build-args: |
-            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+            GITHUB_ACTOR=${{ github.actor }}
+          secrets: |
+            github_token=${{ secrets.PACKAGES_DEPLOY_TOKEN }}
 
   deploy:
     needs: build_and_push
