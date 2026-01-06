@@ -22,7 +22,7 @@ EOF
 COPY . .
 
 # 构建 service 及其依赖模块 (如 agentoz-starter)
-RUN --mount=type=secret,id=github_token mvn clean package -DskipTests -pl agentoz-server -am
+RUN --mount=type=secret,id=github_token mvn clean package -DskipTests -pl agentoz-server -am --batch-mode --errors
 
 # Stage 2: Run
 FROM eclipse-temurin:17-jre-jammy
