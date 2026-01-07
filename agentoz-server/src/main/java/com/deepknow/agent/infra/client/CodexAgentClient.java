@@ -22,6 +22,8 @@ public class CodexAgentClient {
 
     @DubboReference(
             interfaceClass = AgentService.class,
+            // 关键：强制指定直连 URL，从 Nacos 配置读取
+            url = "tri://${codex.agent.host}:${codex.agent.port}",
             protocol = "tri",
             check = false,
             timeout = 600000 
