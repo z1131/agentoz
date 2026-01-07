@@ -1,14 +1,13 @@
 package com.deepknow.agent.infra.client;
 
 import codex.agent.v1.Agent;
-import com.deepknow.agent.infra.grpc.AgentService;
+import codex.agent.v1.AgentService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.stereotype.Component;
-import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
@@ -23,8 +22,6 @@ public class CodexAgentClient {
 
     @DubboReference(
             interfaceClass = AgentService.class,
-            // 关键：强制指定远程服务接口名，必须与 Rust 侧 Proto package.service 一致
-            interfaceName = "codex.agent.v1.AgentService",
             protocol = "tri",
             check = false,
             timeout = 600000 
@@ -56,7 +53,7 @@ public class CodexAgentClient {
                 .build();
 
         return Flux.create(sink -> {
-            log.info("发起 Dubbo Triple 调用: sessionId={}, remoteService=codex.agent.v1.AgentService", sessionId);
+            log.info("发起 Dubbo Triple 调用: sessionId={}", sessionId);
             agentService.runTask(request, new StreamObserver<Agent.RunTaskResponse>() {
                 @Override
                 public void onNext(Agent.RunTaskResponse value) {

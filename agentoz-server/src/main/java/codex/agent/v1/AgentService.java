@@ -1,10 +1,11 @@
-package com.deepknow.agent.infra.grpc;
+package codex.agent.v1;
 
 import codex.agent.v1.Agent;
 import io.grpc.stub.StreamObserver;
 
 /**
- * Dubbo 接口，通过 gRPC (Triple) 协议对接外部 Rust 计算节点。
+ * Dubbo 接口，对应外部 Rust 计算节点。
+ * 注意：必须保留 codex.agent.v1 包名，以匹配 gRPC 协议路径。
  */
 public interface AgentService {
 
