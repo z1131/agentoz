@@ -1,7 +1,7 @@
-package com.deepknow.nexus.infra.client;
+package com.deepknow.agent.infra.client;
 
 import codex.agent.v1.Agent;
-import codex.agent.v1.AgentService;
+import com.deepknow.agent.infra.grpc.AgentService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.grpc.stub.StreamObserver;
@@ -22,23 +22,18 @@ public class CodexAgentClient {
 
     @DubboReference(
             interfaceClass = AgentService.class,
+            // 关键：强制指定远程服务接口名，必须与 Rust 侧 Proto package.service 一致
+            interfaceName = "codex.agent.v1.AgentService",
             protocol = "tri",
             check = false,
-            timeout = 600000 // 10分钟超时，适应长任务
+            timeout = 600000 
     )
     private AgentService agentService;
     
-    // 用于序列化配置对象
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 执行代理任务 (流式返回)
-     *
-     * @param sessionId 会话ID
-     * @param config    会话配置对象 (将被序列化为 JSON)
-     * @param history   历史记录列表 (JSON 字符串列表)
-     * @param inputText 用户输入文本
-     * @return RunTaskResponse 的 Flux 流
      */
     public Flux<Agent.RunTaskResponse> runTask(String sessionId, Object config, List<String> history, String inputText) {
         String configJson;
@@ -60,7 +55,7 @@ public class CodexAgentClient {
                 .build();
 
         return Flux.create(sink -> {
-            log.info("发起 Dubbo Triple 调用: sessionId={}", sessionId);
+            log.info("发起 Dubbo Triple 调用: sessionId={}, remoteService=codex.agent.v1.AgentService", sessionId);
             agentService.runTask(request, new StreamObserver<Agent.RunTaskResponse>() {
                 @Override
                 public void onNext(Agent.RunTaskResponse value) {
@@ -82,11 +77,7 @@ public class CodexAgentClient {
         });
     }
 
-    /**
-     * 健康检查
-     */
     public boolean healthCheck() {
-        // 简单判断代理是否注入
         return agentService != null;
     }
 }

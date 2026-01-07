@@ -1,6 +1,6 @@
-package com.deepknow.nexus.mcp;
+package com.deepknow.agent.mcp;
 
-import com.deepknow.nexus.service.McpService;
+import com.deepknow.agent.service.McpService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

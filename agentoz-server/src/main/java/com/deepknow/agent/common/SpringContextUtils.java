@@ -1,4 +1,4 @@
-package com.deepknow.nexus.common;
+package com.deepknow.agent.common;
 
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;

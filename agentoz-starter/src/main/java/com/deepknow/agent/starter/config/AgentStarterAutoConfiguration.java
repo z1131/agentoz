@@ -1,6 +1,5 @@
 package com.deepknow.agent.starter.config;
 
-import com.deepknow.agent.api.service.AgentService;
 import com.deepknow.agent.starter.core.AgentContext;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;

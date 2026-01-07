@@ -1,6 +1,6 @@
-package com.deepknow.nexus.infra.repo;
+package com.deepknow.agent.infra.repo;
 
-import com.deepknow.nexus.model.UserMessageEntity;
+import com.deepknow.agent.model.UserMessageEntity;
 import java.util.List;
 
 public interface MessageRepository {

@@ -1,8 +1,7 @@
-package com.deepknow.nexus.dto;
+package com.deepknow.agent.dto;
 
 import lombok.Data;
 import java.io.Serializable;
-import java.util.List;
 
 @Data
 public class SessionDTO implements Serializable {

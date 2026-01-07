@@ -154,7 +154,7 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.deepknow.nexus.AgentNexusApplication</mainClass>
+                    <mainClass>com.deepknow.agent.AgentNexusApplication</mainClass>
                 </configuration>
                 <executions>
                     <execution>

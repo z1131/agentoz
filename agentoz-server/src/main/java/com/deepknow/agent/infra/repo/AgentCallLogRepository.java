@@ -1,6 +1,6 @@
-package com.deepknow.nexus.infra.repo;
+package com.deepknow.agent.infra.repo;
 
-import com.deepknow.nexus.model.AgentCallLogEntity;
+import com.deepknow.agent.model.AgentCallLogEntity;
 import java.util.List;
 
 public interface AgentCallLogRepository {

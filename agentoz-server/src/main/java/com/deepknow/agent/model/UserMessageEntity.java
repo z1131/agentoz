@@ -1,4 +1,5 @@
-package com.deepknow.nexus.model;
+package com.deepknow.agent.model;
+import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,7 +14,7 @@ import java.time.LocalDateTime;
  * - 用户可见的消息（用于前端展示）
  * - 不等同于 Agent.context（包含工具调用等内部细节）
  */
-
+@Data
 @TableName("user_messages")
 public class UserMessageEntity {
     private static final Logger log = LoggerFactory.getLogger(UserMessageEntity.class);
@@ -77,104 +78,5 @@ public class UserMessageEntity {
      */
     @TableField("created_at")
     private LocalDateTime createdAt;
-
-    // ==================== 辅助方法 ====================
-
-    /**
-     * 是否为用户消息
-     */
-    public boolean isUserMessage() {
-        return "user".equals(this.role);
-    }
-
-    /**
-     * 是否为助手消息
-     */
-    public boolean isAssistantMessage() {
-        return "assistant".equals(this.role);
-    }
-
-
-    // ==================== Getter and Setter ====================
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getMessageId() {
-        return messageId;
-    }
-
-    public void setMessageId(String messageId) {
-        this.messageId = messageId;
-    }
-
-    public String getSessionId() {
-        return sessionId;
-    }
-
-    public void setSessionId(String sessionId) {
-        this.sessionId = sessionId;
-    }
-
-    public String getAgentId() {
-        return agentId;
-    }
-
-    public void setAgentId(String agentId) {
-        this.agentId = agentId;
-    }
-
-    public String getRole() {
-        return role;
-    }
-
-    public void setRole(String role) {
-        this.role = role;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public Boolean getIsVisible() {
-        return isVisible;
-    }
-
-    public void setIsVisible(Boolean isVisible) {
-        this.isVisible = isVisible;
-    }
-
-    public Integer getSequence() {
-        return sequence;
-    }
-
-    public void setSequence(Integer sequence) {
-        this.sequence = sequence;
-    }
-
-    public Integer getTokens() {
-        return tokens;
-    }
-
-    public void setTokens(Integer tokens) {
-        this.tokens = tokens;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
 
 }

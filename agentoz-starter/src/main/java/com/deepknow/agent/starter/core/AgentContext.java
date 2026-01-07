@@ -1,6 +1,5 @@
 package com.deepknow.agent.starter.core;
 
-import com.deepknow.agent.api.service.AgentService;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;

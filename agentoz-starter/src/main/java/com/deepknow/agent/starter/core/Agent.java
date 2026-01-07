@@ -4,7 +4,6 @@ import com.deepknow.agent.api.model.AgentConfig;
 import com.deepknow.agent.api.model.ChatRequest;
 import com.deepknow.agent.api.model.ChatResponse;
 import com.deepknow.agent.api.model.McpServerConfig;
-import com.deepknow.agent.api.service.AgentService;
 
 import java.util.ArrayList;
 import java.util.HashMap;

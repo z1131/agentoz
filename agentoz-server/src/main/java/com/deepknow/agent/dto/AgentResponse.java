@@ -1,4 +1,4 @@
-package com.deepknow.nexus.dto;
+package com.deepknow.agent.dto;
 
 import lombok.Data;
 import java.io.Serializable;

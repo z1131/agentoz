@@ -1,14 +1,9 @@
-package com.deepknow.nexus.infra.repo;
+package com.deepknow.agent.infra.repo;
 
-import com.deepknow.nexus.model.SessionEntity;
-import java.util.Optional;
-import java.util.List;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.deepknow.agent.model.SessionEntity;
+import org.apache.ibatis.annotations.Mapper;
 
-public interface SessionRepository {
-    void save(SessionEntity session);
-    Optional<SessionEntity> getById(String sessionId);
-    List<SessionEntity> findByUserId(String userId);
-    void updateStatus(String sessionId, String status);
-    void updateActivity(String sessionId);
-    void deleteById(String sessionId);
+@Mapper
+public interface SessionRepository extends BaseMapper<SessionEntity> {
 }

@@ -1,97 +1,69 @@
-package com.deepknow.nexus.model;
+package com.deepknow.agent.model;
 
 import com.baomidou.mybatisplus.annotation.*;
-import com.deepknow.nexus.common.JsonUtils;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import com.deepknow.agent.dto.codex.ModelProviderInfo;
+import com.deepknow.agent.dto.codex.McpServerConfig;
+import lombok.Data;
+import lombok.Builder;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
-@TableName("agents")
+/**
+ * Agent 实体模型
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@TableName(value = "agents", autoResultMap = true)
 public class AgentEntity {
+
     @TableId(type = IdType.AUTO)
     private Long id;
+
     private String agentId;
     private String sessionId;
     private String agentName;
     private String agentType;
-    private String systemPrompt;
-    private String mcpConfig;
-    private String context;
+
+    // ==================== 强类型计算配置 ====================
+
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private ModelProviderInfo provider;
+
+    private String model;
+
+    /**
+     * 开发者指令 (持久化存储)
+     */
+    private String developerInstructions;
+
+    /**
+     * 用户指令 (持久化存储)
+     */
+    private String userInstructions;
+
+    /**
+     * MCP 工具配置映射
+     */
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private Map<String, McpServerConfig> mcpConfig;
+
+    // ==================== 上下文双维度分离 ====================
+
+    private String fullHistory;
+    private String activeContext;
+
+    // ==================== 状态与生命周期 ====================
+
     private String state;
+    private String metadata;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime lastUsedAt;
-
-    // 手写 Getter/Setter
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public String getAgentId() { return agentId; }
-    public void setAgentId(String agentId) { this.agentId = agentId; }
-    public String getSessionId() { return sessionId; }
-    public void setSessionId(String sessionId) { this.sessionId = sessionId; }
-    public String getAgentName() { return agentName; }
-    public void setAgentName(String agentName) { this.agentName = agentName; }
-    public String getAgentType() { return agentType; }
-    public void setAgentType(String agentType) { this.agentType = agentType; }
-    public String getSystemPrompt() { return systemPrompt; }
-    public void setSystemPrompt(String systemPrompt) { this.systemPrompt = systemPrompt; }
-    public String getMcpConfig() { return mcpConfig; }
-    public void setMcpConfig(String mcpConfig) { this.mcpConfig = mcpConfig; }
-    public String getContext() { return context; }
-    public void setContext(String context) { this.context = context; }
-    public String getState() { return state; }
-    public void setState(String state) { this.state = state; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
-    public LocalDateTime getLastUsedAt() { return lastUsedAt; }
-    public void setLastUsedAt(LocalDateTime lastUsedAt) { this.lastUsedAt = lastUsedAt; }
-
-    // ==================== 行为逻辑 ====================
-    public void appendUserMessage(String text) {
-        List<Map<String, Object>> history = parseContext();
-        Map<String, Object> msg = new HashMap<>();
-        msg.put("type", "message");
-        msg.put("role", "user");
-        msg.put("content", List.of(Map.of("type", "input_text", "text", text)));
-        history.add(msg);
-        this.context = JsonUtils.toJson(history);
-    }
-
-    public void appendAssistantMessage(String text) {
-        List<Map<String, Object>> history = parseContext();
-        Map<String, Object> msg = new HashMap<>();
-        msg.put("type", "message");
-        msg.put("role", "assistant");
-        msg.put("content", List.of(Map.of("type", "output_text", "text", text)));
-        history.add(msg);
-        this.context = JsonUtils.toJson(history);
-    }
-
-    public void transitToThinking() {
-        this.state = "THINKING";
-        this.updatedAt = LocalDateTime.now();
-    }
-
-    public void transitToIdle() {
-        this.state = "IDLE";
-        this.lastUsedAt = LocalDateTime.now();
-    }
-
-    public Map<String, Object> getMcpConfigMap() {
-        if (mcpConfig == null || mcpConfig.isEmpty()) return new HashMap<>();
-        return JsonUtils.fromJson(mcpConfig, Map.class);
-    }
-
-    public void setMcpConfigMap(Map<String, Object> map) {
-        this.mcpConfig = JsonUtils.toJson(map);
-    }
-
-    private List<Map<String, Object>> parseContext() {
-        if (context == null || context.isEmpty() || "[]".equals(context)) return new ArrayList<>();
-        return JsonUtils.fromJson(context, List.class);
-    }
 }

@@ -1,7 +1,7 @@
-package com.deepknow.nexus.infra.repo;
+package com.deepknow.agent.infra.repo;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.deepknow.nexus.model.AgentEntity;
+import com.deepknow.agent.model.AgentEntity;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 
