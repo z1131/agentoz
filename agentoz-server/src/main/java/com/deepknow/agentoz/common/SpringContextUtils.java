@@ -1,4 +1,4 @@
-package com.deepknow.agentozoz.common;
+package com.deepknow.agentoz.common;
 
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;

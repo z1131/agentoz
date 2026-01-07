@@ -1,4 +1,4 @@
-package com.deepknow.agentozoz.dto;
+package com.deepknow.agentoz.dto;
 
 import lombok.Data;
 import java.io.Serializable;

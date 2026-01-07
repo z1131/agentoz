@@ -1,4 +1,4 @@
-package com.deepknow.agentozoz.model;
+package com.deepknow.agentoz.model;
 
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;

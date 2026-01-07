@@ -1,7 +1,7 @@
-package com.deepknow.agentozoz.infra.repo;
+package com.deepknow.agentoz.infra.repo;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.deepknow.agentozoz.model.SessionEntity;
+import com.deepknow.agentoz.model.SessionEntity;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper

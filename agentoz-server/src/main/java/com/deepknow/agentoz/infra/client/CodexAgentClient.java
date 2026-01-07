@@ -1,4 +1,4 @@
-package com.deepknow.agentozoz.infra.client;
+package com.deepknow.agentoz.infra.client;
 
 import codex.agent.v1.Agent;
 import codex.agent.v1.AgentService;

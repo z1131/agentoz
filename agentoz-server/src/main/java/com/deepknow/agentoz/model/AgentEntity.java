@@ -1,9 +1,9 @@
-package com.deepknow.agentozoz.model;
+package com.deepknow.agentoz.model;
 
 import com.baomidou.mybatisplus.annotation.*;
 import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
-import com.deepknow.agentozoz.dto.codex.ModelProviderInfo;
-import com.deepknow.agentozoz.dto.codex.McpServerConfig;
+import com.deepknow.agentoz.dto.codex.ModelProviderInfo;
+import com.deepknow.agentoz.dto.codex.McpServerConfig;
 import lombok.Data;
 import lombok.Builder;
 import lombok.NoArgsConstructor;

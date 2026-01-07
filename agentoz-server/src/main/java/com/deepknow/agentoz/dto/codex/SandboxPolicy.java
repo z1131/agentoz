@@ -1,4 +1,4 @@
-package com.deepknow.agentozoz.dto.codex;
+package com.deepknow.agentoz.dto.codex;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
