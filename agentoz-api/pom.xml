@@ -16,6 +16,14 @@
     <description>AgentOZ 公共契约层：包含接口定义、DTO和注解</description>
 
     <dependencies>
+        <!-- Dubbo 核心依赖 (用于 Triple 协议流式接口定义) -->
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo</artifactId>
+            <version>${dubbo.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- 只依赖最基础的工具包 -->
         <dependency>
             <groupId>org.projectlombok</groupId>
