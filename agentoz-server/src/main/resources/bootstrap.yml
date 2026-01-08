@@ -29,12 +29,12 @@ spring:
 dubbo:
   application:
     name: agentoz
-    register-mode: all
   protocol:
     name: dubbo
     port: 20883
   registry:
-    address: nacos://${NACOS_SERVER_ADDR:127.0.0.1:8848}?group=${NACOS_GROUP:DEEPKNOW_GROUP}
+    address: nacos://${NACOS_SERVER_ADDR:127.0.0.1:8848}
+    group: ${NACOS_GROUP:DEEPKNOW_GROUP}
     username: ${NACOS_USERNAME:nacos}
     password: ${NACOS_PASSWORD:nacos}
     parameters:
