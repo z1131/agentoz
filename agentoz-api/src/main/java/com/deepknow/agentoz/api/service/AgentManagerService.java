@@ -1,7 +1,7 @@
 package com.deepknow.agentoz.api.service;
 
 import com.deepknow.agentoz.api.dto.AgentDefineRequest;
-import com.deepknow.agentoz.api.dto.SessionCreateRequest;
+import com.deepknow.agentoz.api.dto.ConversationCreateRequest;
 
 /**
  * Agent 管理服务 (控制面)
@@ -10,11 +10,11 @@ import com.deepknow.agentoz.api.dto.SessionCreateRequest;
 public interface AgentManagerService {
 
     /**
-     * 创建一个新会话
+     * 创建一个新会话（已重命名为Conversation）
      * @param request 包含用户ID、业务标签等信息
-     * @return sessionId 会话唯一标识
+     * @return conversationId 会话唯一标识
      */
-    String createSession(SessionCreateRequest request);
+    String createConversation(ConversationCreateRequest request);
 
     /**
      * 在指定会话中定义/装配一个 Agent
@@ -32,5 +32,5 @@ public interface AgentManagerService {
     /**
      * 结束会话
      */
-    void endSession(String sessionId);
+    void endConversation(String conversationId);
 }

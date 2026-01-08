@@ -1,0 +1,239 @@
+package com.deepknow.agentoz.provider;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.deepknow.agentoz.api.dto.AgentConfigDTO;
+import com.deepknow.agentoz.api.dto.AgentDefineRequest;
+import com.deepknow.agentoz.api.dto.ConversationCreateRequest;
+import com.deepknow.agentoz.api.service.AgentManagerService;
+import com.deepknow.agentoz.infra.converter.api.ConfigApiAssembler;
+import com.deepknow.agentoz.model.AgentConfigEntity;
+import com.deepknow.agentoz.model.AgentEntity;
+import com.deepknow.agentoz.model.ConversationEntity;
+import com.deepknow.agentoz.infra.repo.AgentConfigRepository;
+import com.deepknow.agentoz.infra.repo.AgentRepository;
+import com.deepknow.agentoz.infra.repo.ConversationRepository;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
+@Slf4j
+@DubboService
+public class AgentManagerServiceImpl implements AgentManagerService {
+
+    @Autowired
+    private AgentRepository agentRepository;
+
+    @Autowired
+    private AgentConfigRepository agentConfigRepository;
+
+    @Autowired
+    private ConversationRepository conversationRepository;
+
+    @Override
+    @Transactional
+    public String createConversation(ConversationCreateRequest request) {
+        String conversationId = UUID.randomUUID().toString();
+        log.info("创建新会话: conversationId={}, userId={}", conversationId, request.getUserId());
+
+        ConversationEntity conversation = ConversationEntity.builder()
+                .conversationId(conversationId)
+                .userId(request.getUserId())
+                .businessCode(request.getBusinessCode())
+                .title(request.getTitle())
+                .status("ACTIVE")
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .lastActivityAt(LocalDateTime.now())
+                .build();
+
+        conversationRepository.insert(conversation);
+        return conversationId;
+    }
+
+    @Override
+    @Transactional
+    public String defineAgent(AgentDefineRequest request) {
+        String agentId = UUID.randomUUID().toString();
+        log.info("定义 Agent: agentId={}, conversationId={}, type={}, configId={}",
+                agentId, request.getConversationId(), request.getAgentType(),
+                request.getConfigId());
+
+        // 1. 确定配置ID（复用或新建）
+        String configId = request.getConfigId();
+        if (configId == null || configId.isEmpty()) {
+            // 方式2: 新建配置
+            configId = createAgentConfig(request.getConfig());
+            log.info("创建新配置: configId={}", configId);
+        } else {
+            // 方式1: 验证配置是否存在
+            AgentConfigEntity existingConfig = agentConfigRepository.selectOne(
+                    new LambdaQueryWrapper<AgentConfigEntity>().eq(AgentConfigEntity::getConfigId, configId)
+            );
+            if (existingConfig == null) {
+                throw new IllegalArgumentException("配置不存在: configId=" + configId);
+            }
+            log.info("复用已有配置: configId={}", configId);
+        }
+
+        // 2. 创建Agent实例
+        Integer priority = request.getPriority() != null ? request.getPriority() : 5;
+
+        AgentEntity agent = AgentEntity.builder()
+                .agentId(agentId)
+                .conversationId(request.getConversationId())
+                .configId(configId)
+                .agentName(request.getAgentName())
+                .agentType(request.getAgentType())
+                .description(request.getDescription())
+                .state("IDLE")
+                .priority(priority)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .lastUsedAt(LocalDateTime.now())
+                .build();
+
+        agentRepository.insert(agent);
+        log.info("Agent创建成功: agentId={}, configId={}", agentId, configId);
+
+        return agentId;
+    }
+
+    @Override
+    @Transactional
+    public void removeAgent(String agentId) {
+        log.info("删除 Agent: agentId={}", agentId);
+
+        // 查询Agent信息
+        AgentEntity agent = agentRepository.selectOne(
+                new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, agentId)
+        );
+
+        if (agent == null) {
+            log.warn("Agent不存在: agentId={}", agentId);
+            return;
+        }
+
+        String configId = agent.getConfigId();
+
+        // 删除Agent实例
+        agentRepository.delete(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, agentId));
+
+        // 清理孤儿配置（如果配置不被其他Agent使用且不是模板配置）
+        cleanupOrphanedConfig(configId);
+
+        log.info("Agent删除成功: agentId={}, configId={}", agentId, configId);
+    }
+
+    /**
+     * 清理不再使用的配置
+     *
+     * <p>如果配置满足以下条件之一，则不删除:</p>
+     * <ul>
+     *   <li>是模板配置 (isTemplate = true)</li>
+     *   <li>还在被其他Agent使用</li>
+     * </ul>
+     *
+     * @param configId 配置ID
+     */
+    private void cleanupOrphanedConfig(String configId) {
+        // 1. 查询配置信息
+        AgentConfigEntity config = agentConfigRepository.selectOne(
+                new LambdaQueryWrapper<AgentConfigEntity>().eq(AgentConfigEntity::getConfigId, configId)
+        );
+
+        if (config == null) {
+            log.warn("配置不存在: configId={}", configId);
+            return;
+        }
+
+        // 2. 如果是模板配置,不删除
+        if (Boolean.TRUE.equals(config.getIsTemplate())) {
+            log.debug("跳过模板配置的清理: configId={}", configId);
+            return;
+        }
+
+        // 3. 检查是否还有其他Agent使用此配置
+        Long usageCount = agentRepository.selectCount(
+                new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getConfigId, configId)
+        );
+
+        if (usageCount > 0) {
+            log.debug("配置还在被其他Agent使用,不删除: configId={}, usageCount={}", configId, usageCount);
+            return;
+        }
+
+        // 4. 删除孤儿配置
+        agentConfigRepository.delete(new LambdaQueryWrapper<AgentConfigEntity>().eq(AgentConfigEntity::getConfigId, configId));
+        log.info("清理孤儿配置成功: configId={}", configId);
+    }
+
+    @Override
+    @Transactional
+    public void endConversation(String conversationId) {
+        log.info("结束会话: conversationId={}", conversationId);
+
+        // 删除会话下的所有Agent
+        agentRepository.delete(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getConversationId, conversationId));
+
+        // 删除会话
+        conversationRepository.delete(new LambdaQueryWrapper<ConversationEntity>().eq(ConversationEntity::getConversationId, conversationId));
+
+        log.info("会话结束成功: conversationId={}", conversationId);
+    }
+
+    /**
+     * 创建Agent配置实体
+     *
+     * @param apiConfig API层的AgentConfigDTO
+     * @return configId
+     */
+    private String createAgentConfig(AgentConfigDTO apiConfig) {
+        String configId = "cfg-" + UUID.randomUUID().toString();
+
+        // 转换API层DTO到Server层VO (Assembler)
+        var provider = ConfigApiAssembler.toProviderConfig(apiConfig.getProvider());
+        var modelOverrides = ConfigApiAssembler.toModelOverrides(apiConfig.getModelOverrides());
+        var mcpServers = ConfigApiAssembler.toMcpServerConfigMap(apiConfig.getMcpServers());
+        var sessionSource = ConfigApiAssembler.toSessionSource(apiConfig.getSessionSource());
+
+        // 构建配置实体
+        AgentConfigEntity configEntity = AgentConfigEntity.builder()
+                .configId(configId)
+                .configName(apiConfig.getConfigName())
+                .description(apiConfig.getDescription())
+                .tags(apiConfig.getTags())
+                // 基础环境
+                .provider(provider)  // 转换后的Server层DTO
+                .model(apiConfig.getModel())
+                .cwd(apiConfig.getCwd())
+                // 策略配置
+                .approvalPolicy(apiConfig.getApprovalPolicy())
+                .sandboxPolicy(apiConfig.getSandboxPolicy())
+                // 指令配置
+                .developerInstructions(apiConfig.getDeveloperInstructions())
+                .userInstructions(apiConfig.getUserInstructions())
+                .baseInstructions(apiConfig.getBaseInstructions())
+                // 推理配置
+                .reasoningEffort(apiConfig.getReasoningEffort())
+                .reasoningSummary(apiConfig.getReasoningSummary())
+                .compactPrompt(apiConfig.getCompactPrompt())
+                // 高级配置
+                .modelOverrides(modelOverrides)  // 转换后的Server层DTO
+                .mcpServers(mcpServers)  // 转换后的Server层DTO Map
+                .sessionSource(sessionSource)  // 转换后的Server层DTO
+                // 元数据
+                .isTemplate(false)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+
+        agentConfigRepository.insert(configEntity);
+        return configId;
+    }
+}

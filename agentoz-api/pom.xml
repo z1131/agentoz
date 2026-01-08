@@ -24,6 +24,18 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Reactor Core (用于响应式流式接口) -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+        </dependency>
+
+        <!-- Reactive Streams (Reactor依赖) -->
+        <dependency>
+            <groupId>org.reactivestreams</groupId>
+            <artifactId>reactive-streams</artifactId>
+        </dependency>
+
         <!-- 只依赖最基础的工具包 -->
         <dependency>
             <groupId>org.projectlombok</groupId>

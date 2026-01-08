@@ -5,26 +5,48 @@ import com.deepknow.agentoz.api.dto.StreamChatRequest;
 import com.deepknow.agentoz.api.dto.StreamChatResponse;
 import com.deepknow.agentoz.api.dto.TaskResponse;
 import org.apache.dubbo.common.stream.StreamObserver;
+import reactor.core.publisher.Flux;
 
 /**
  * Agent 执行服务 (数据面)
  * 驱动智能体进行任务推理与实时交互
+ *
+ * <h3>🔄 响应式流式设计</h3>
+ * <ul>
+ *   <li><b>executeTask</b>: 使用 Reactor Flux 实现服务端流式调用</li>
+ *   <li><b>streamInputExecuteTask</b>: 双向流式调用（暂保留StreamObserver）</li>
+ * </ul>
+ *
+ * <h3>📋 Dubbo Triple + Reactor 支持</h3>
+ * <p>基于 Dubbo 3.1.0+ 的 Triple 协议和 Project Reactor 集成</p>
+ * @see <a href="https://cn.dubbo.apache.org/zh-cn/overview/mannual/java-sdk/tasks/framework/more/reactive/">Dubbo Reactive文档</a>
  */
 public interface AgentExecutionService {
 
     /**
      * 执行单次任务指令 (Unary Input -> Server Stream)
      * 对应 Codex 的 RunTask 模式
-     * 
+     *
+     * <h3>🔄 响应式流式返回</h3>
+     * <pre>
+     * Flux&lt;TaskResponse&gt; 流式返回:
+     *   1. 思考过程
+     *   2. 工具调用
+     *   3. 部分回复
+     *   4. 最终完成
+     * </pre>
+     *
      * @param request 任务请求（指定 Agent 和输入消息）
-     * @param responseObserver 结果流（包含思考过程、工具调用、最终回复）
+     * @return 响应流（包含思考过程、工具调用、最终回复）
      */
-    void executeTask(ExecuteTaskRequest request, StreamObserver<TaskResponse> responseObserver);
+    Flux<TaskResponse> executeTask(ExecuteTaskRequest request);
 
     /**
      * 全双工实时交互任务 (Bidirectional Stream)
      * 对应 Codex 的 RealtimeChat 模式
-     * 
+     *
+     * <p>TODO: 后续改造成 Flux&lt;&gt; Flux 双向流</p>
+     *
      * @param responseObserver 响应流（实时语音/文本结果）
      * @return 请求流（用于持续推送语音数据或文本插话）
      */
