@@ -83,8 +83,8 @@ public class AgentManagerServiceImpl implements AgentManagerService {
     @Transactional
     public String defineAgent(AgentDefineRequest request) {
         String agentId = UUID.randomUUID().toString();
-        log.info("定义 Agent: agentId={}, conversationId={}, type={}, configId={}",
-                agentId, request.getConversationId(), request.getAgentType(),
+        log.info("定义 Agent: agentId={}, conversationId={}, isPrimary={}, configId={}",
+                agentId, request.getConversationId(), request.getIsPrimary(),
                 request.getConfigId());
 
         // 1. 确定配置ID（复用或新建）
@@ -112,7 +112,7 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 .conversationId(request.getConversationId())
                 .configId(configId)
                 .agentName(request.getAgentName())
-                .agentType(request.getAgentType())
+                .isPrimary(request.getIsPrimary())
                 .description(request.getDescription())
                 .state("IDLE")
                 .priority(priority)
@@ -233,7 +233,7 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 .tags(apiConfig.getTags())
                 // 基础环境
                 .provider(provider)  // 转换后的Server层DTO
-                .model(apiConfig.getModel())
+                .llmModel(apiConfig.getLlmModel())
                 .cwd(apiConfig.getCwd())
                 // 策略配置
                 .approvalPolicy(apiConfig.getApprovalPolicy())

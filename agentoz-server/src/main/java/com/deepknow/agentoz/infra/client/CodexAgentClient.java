@@ -84,8 +84,8 @@ public class CodexAgentClient {
 
         // 4. 发起Dubbo Triple调用
         return Flux.create(sink -> {
-            log.info("发起 Codex-Agent 调用: conversationId={}, model={}",
-                    conversationId, config.getModel());
+            log.info("发起 Codex-Agent 调用: conversationId={}, llmModel={}",
+                    conversationId, config.getLlmModel());
 
             agentRpcService.runTask(request, new StreamObserver<RunTaskResponse>() {
                 @Override

@@ -102,8 +102,8 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
         //         AgentEntity.activeContext是用于计算的活跃上下文
         List<HistoryItem> historyItems = parseActiveContext(agent.getActiveContext());
 
-        log.info("Agent配置加载完成: agentId={}, model={}, conversationId={}, historySize={}",
-                agentId, config.getModel(), agent.getConversationId(), historyItems.size());
+        log.info("Agent配置加载完成: agentId={}, llmModel={}, conversationId={}, historySize={}",
+                agentId, config.getLlmModel(), agent.getConversationId(), historyItems.size());
 
         // 4. 调用Codex-Agent计算节点（返回Flux<RunTaskResponse>）
         Flux<com.deepknow.agentoz.infra.adapter.grpc.RunTaskResponse> protoFlux =

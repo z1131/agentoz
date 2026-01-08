@@ -79,10 +79,10 @@ public class AgentEntity {
     private String agentName;
 
     /**
-     * Agent类型/角色
-     * 示例: "coder", "analyst", "reviewer"
+     * 是否主Agent
      */
-    private String agentType;
+    @TableField("agent_type")
+    private Boolean isPrimary;
 
     /**
      * Agent描述

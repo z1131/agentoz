@@ -21,14 +21,14 @@ import java.io.Serializable;
  * AgentDefineRequest request = new AgentDefineRequest();
  * request.setConversationId("conv-123");
  * request.setAgentName("代码助手");
- * request.setAgentType("coder");
+ * request.setIsPrimary(true);
  * request.setConfigId("cfg-qwen-max"); // 复用已有配置
  *
  * // 方式2: 新建配置
  * AgentDefineRequest request = new AgentDefineRequest();
  * request.setConversationId("conv-123");
  * request.setAgentName("数据分析");
- * request.setAgentType("analyst");
+ * request.setIsPrimary(false);
  * request.setConfig(new AgentConfigDTO()); // 新建配置
  * </pre>
  */
@@ -48,10 +48,9 @@ public class AgentDefineRequest implements Serializable {
     private String agentName;
 
     /**
-     * Agent类型/角色
-     * 示例: "coder", "analyst", "reviewer"
+     * 是否主Agent
      */
-    private String agentType;
+    private Boolean isPrimary;
 
     /**
      * Agent描述（可选）

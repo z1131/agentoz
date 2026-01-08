@@ -46,8 +46,8 @@ public class ConfigProtoConverter {
         if (entity.getProvider() != null) {
             builder.setProvider(toProviderConfig(entity.getProvider()));
         }
-        if (entity.getModel() != null) {
-            builder.setModel(entity.getModel());
+        if (entity.getLlmModel() != null) {
+            builder.setModel(entity.getLlmModel());
         }
         if (entity.getCwd() != null) {
             builder.setCwd(entity.getCwd());

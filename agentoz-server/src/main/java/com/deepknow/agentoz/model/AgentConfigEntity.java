@@ -89,7 +89,8 @@ public class AgentConfigEntity {
      * 对应Proto: string model
      * 示例: "qwen-max", "gpt-4o", "deepseek-chat"
      */
-    private String model;
+    @TableField("model")
+    private String llmModel;
 
     /**
      * 工作目录（绝对路径）

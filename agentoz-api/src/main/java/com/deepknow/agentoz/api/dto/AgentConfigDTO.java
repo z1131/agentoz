@@ -52,7 +52,7 @@ public class AgentConfigDTO implements Serializable {
      * 模型名称
      * 示例: "qwen-max", "gpt-4o", "deepseek-chat"
      */
-    private String model;
+    private String llmModel;
 
     /**
      * 工作目录（绝对路径）
