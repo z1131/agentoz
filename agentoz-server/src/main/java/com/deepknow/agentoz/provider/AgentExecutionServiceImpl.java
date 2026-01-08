@@ -73,20 +73,41 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
     @Override
     public Flux<TaskResponse> executeTask(ExecuteTaskRequest request) {
         String agentId = request.getAgentId();
+        String conversationId = request.getConversationId();
 
-        log.info("开始执行任务: agentId={}, message={}", agentId, request.getMessage());
+        log.info("收到任务请求: agentId={}, conversationId={}, message={}", agentId, conversationId, request.getMessage());
 
-        // 1. 查询Agent实体
+        // 1. 自动寻找主智能体逻辑
+        if (agentId == null || agentId.isEmpty()) {
+            if (conversationId == null || conversationId.isEmpty()) {
+                return Flux.error(new IllegalArgumentException("agentId 和 conversationId 不能同时为空"));
+            }
+            // 查询主智能体 (isPrimary = true)
+            AgentEntity primaryAgent = agentRepository.selectOne(
+                    new LambdaQueryWrapper<AgentEntity>()
+                            .eq(AgentEntity::getConversationId, conversationId)
+                            .eq(AgentEntity::getIsPrimary, true)
+            );
+            if (primaryAgent == null) {
+                log.error("会话不存在主智能体: conversationId={}", conversationId);
+                return Flux.error(new IllegalStateException("会话未定义主智能体: " + conversationId));
+            }
+            agentId = primaryAgent.getAgentId();
+            log.info("自动路由至主智能体: agentId={}", agentId);
+        }
+
+        // 2. 查询Agent实体
+        final String finalAgentId = agentId;
         AgentEntity agent = agentRepository.selectOne(
-                new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, agentId)
+                new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, finalAgentId)
         );
 
         if (agent == null) {
-            log.error("Agent不存在: agentId={}", agentId);
-            return Flux.error(new IllegalArgumentException("Agent不存在: " + agentId));
+            log.error("Agent不存在: agentId={}", finalAgentId);
+            return Flux.error(new IllegalArgumentException("Agent不存在: " + finalAgentId));
         }
 
-        // 2. 查询Agent配置
+        // 3. 查询Agent配置
         AgentConfigEntity config = agentConfigRepository.selectOne(
                 new LambdaQueryWrapper<AgentConfigEntity>()
                         .eq(AgentConfigEntity::getConfigId, agent.getConfigId())
@@ -97,15 +118,13 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             return Flux.error(new IllegalArgumentException("Agent配置不存在: " + agent.getConfigId()));
         }
 
-        // 3. 从AgentEntity的activeContext加载计算上下文（传给codex-agent的历史消息）
-        //    注意: ConversationEntity.fullHistoryContext是给用户看的完整历史
-        //         AgentEntity.activeContext是用于计算的活跃上下文
+        // 4. 从AgentEntity的activeContext加载计算上下文
         List<HistoryItem> historyItems = parseActiveContext(agent.getActiveContext());
 
         log.info("Agent配置加载完成: agentId={}, llmModel={}, conversationId={}, historySize={}",
-                agentId, config.getLlmModel(), agent.getConversationId(), historyItems.size());
+                finalAgentId, config.getLlmModel(), agent.getConversationId(), historyItems.size());
 
-        // 4. 调用Codex-Agent计算节点（返回Flux<RunTaskResponse>）
+        // 5. 调用Codex-Agent计算节点
         Flux<com.deepknow.agentoz.infra.adapter.grpc.RunTaskResponse> protoFlux =
                 codexAgentClient.runTask(
                         agent.getConversationId(),
@@ -114,15 +133,15 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                         request.getMessage()
                 );
 
-        // 5. 转换Proto响应为DTO并返回
+        // 6. 转换Proto响应为DTO并返回
         return protoFlux
                 .map(TaskResponseProtoConverter::toTaskResponse)  // Proto → DTO
-                .doOnSubscribe(subscription -> log.info("开始订阅Codex-Agent响应流: agentId={}", agentId))
-                .doOnNext(response -> log.debug("收到任务响应: agentId={}, status={}", agentId, response.getStatus()))
-                .doOnComplete(() -> log.info("任务执行完成: agentId={}", agentId))
-                .doOnError(error -> log.error("任务执行异常: agentId={}", agentId, error))
+                .doOnSubscribe(subscription -> log.info("开始订阅Codex-Agent响应流: agentId={}", finalAgentId))
+                .doOnNext(response -> log.debug("收到任务响应: agentId={}, status={}", finalAgentId, response.getStatus()))
+                .doOnComplete(() -> log.info("任务执行完成: agentId={}", finalAgentId))
+                .doOnError(error -> log.error("任务执行异常: agentId={}", finalAgentId, error))
                 .onErrorResume(error -> {
-                    // 7. 错误处理：返回错误响应
+                    // 7. 错误处理
                     TaskResponse errorResponse = new TaskResponse();
                     errorResponse.setStatus("ERROR");
                     errorResponse.setErrorMessage(error.getMessage());
