@@ -1,29 +1,188 @@
 syntax = "proto3";
 
-package codex.agent.v1;
+package codex.agent;
+
+// =============================================================================
+// 语言特定选项 - Language Options
+// =============================================================================
+
+// ✅ Java 专用配置 (不影响 Rust)
+option java_package = "com.deepknow.agentoz.infra.adapter.grpc";
+option java_outer_classname = "AgentProtos";
+option java_multiple_files = true;
+option java_generate_equals_and_hash = true;
+
+// =============================================================================
+// 服务定义 - Service Definition
+// =============================================================================
 
 service AgentService {
-  // 执行一次代理任务
-  // 输入：历史记录 + 新指令
-  // 输出：执行结果 + 新增记录（流式）
+  // 执行一次代理任务 (无状态设计)
+  // 必须传递结构化的 SessionConfig 和完整的 HistoryItem 列表
   rpc RunTask (RunTaskRequest) returns (stream RunTaskResponse);
 
   // 全双工实时对话接口
-  // 支持音频/文本流式输入，实时返回 STT 结果和 Agent 回复
   rpc RealtimeChat (stream ChatRequest) returns (stream ChatResponse);
 }
 
+// =============================================================================
+// 主请求结构
+// =============================================================================
+
 message RunTaskRequest {
-  string session_id = 1;
+  string conversation_id = 1; // 仅用于日志追踪
 
-  // 代理配置 (JSON 格式，对应 SessionConfigDto)
-  string config_json = 2;
+  // ✅ 强类型配置：不再是 JSON 字符串
+  SessionConfig config = 2;
 
-  // 历史记录 (JSON 格式，对应 List<ResponseItem>)
-  repeated string history_items_json = 3;
+  // ✅ 强类型历史：不再是 JSON 字符串数组
+  repeated HistoryItem history = 3;
 
-  // 用户新输入
   UserInput input = 4;
+}
+
+// =============================================================================
+// 1. SessionConfig (替代原 config_json)
+// =============================================================================
+
+message SessionConfig {
+  // --- 基础环境 ---
+  ProviderConfig provider = 1;   // 模型提供商
+  string model = 2;              // 模型名称 (e.g., "gpt-4o")
+  string cwd = 3;                // 工作目录 (绝对路径)
+
+  // --- 策略配置 ---
+  optional ApprovalPolicy approval_policy = 4;
+  optional SandboxPolicy sandbox_policy = 5;
+
+  // --- 指令配置 ---
+  optional string developer_instructions = 6; // 开发者指令 (最高优先级)
+  optional string user_instructions = 7;      // 用户指令
+  optional string base_instructions = 8;      // 基础指令 (覆盖默认)
+
+  // --- 推理配置 ---
+  optional ReasoningEffort model_reasoning_effort = 12;  // 推理努力程度
+  optional ReasoningSummary model_reasoning_summary = 13; // 推理摘要模式
+
+  // --- 提示词优化 ---
+  optional string compact_prompt = 14;  // 压缩提示词覆盖
+
+  // --- 模型能力覆盖 (Model Overrides) ---
+  optional ModelOverrides model_overrides = 9;
+
+  // --- 扩展配置 ---
+  map<string, McpServerConfig> mcp_servers = 10; // 动态注入 MCP 服务器
+  optional SessionSource session_source = 11;    // 调用来源标识
+}
+
+// =============================================================================
+// 推理配置枚举
+// =============================================================================
+
+enum ReasoningEffort {
+  REASONING_EFFORT_UNSPECIFIED = 0;
+  REASONING_NONE = 1;        // 无推理
+  MINIMAL = 2;     // 最小推理
+  LOW = 3;         // 低推理
+  MEDIUM = 4;      // 中等推理 (默认)
+  HIGH = 5;        // 高推理
+}
+
+enum ReasoningSummary {
+  REASONING_SUMMARY_UNSPECIFIED = 0;
+  AUTO = 1;        // 自动模式 (默认)
+  CONCISE = 2;     // 简洁摘要
+  DETAILED = 3;    // 详细摘要
+  REASONING_SUMMARY_NONE = 4;        // 无摘要
+}
+
+message ProviderConfig {
+  string name = 1;                      // e.g., "openai", "qwen"
+  optional string base_url = 2;         // e.g., "https://dashscope..."
+  optional string api_key = 3;          // 对应 experimental_bearer_token
+  optional string wire_api = 4;         // "chat" | "responses"
+}
+
+message ModelOverrides {
+  // Shell 工具类型: "Default" (OpenAI), "Disabled" (国产模型), "ShellCommand"
+  optional string shell_type = 1;
+
+  // 是否支持并行工具调用 (Qwen/Claude=true, OpenAI/DeepSeek=false)
+  optional bool supports_parallel_tool_calls = 2;
+
+  // 补丁工具类型: "Required" (OpenAI), null (其他)
+  optional string apply_patch_tool_type = 3;
+
+  // 上下文窗口大小
+  optional uint64 context_window = 4;
+
+  // 自动压缩历史的阈值
+  optional uint64 auto_compact_token_limit = 5;
+}
+
+message McpServerConfig {
+  string command = 1;          // e.g., "npx", "docker"
+  repeated string args = 2;    // e.g., ["-y", "@modelcontextprotocol/server-git"]
+  map<string, string> env = 3; // 环境变量
+}
+
+message SessionSource {
+  string source_type = 1;      // "API", "IDE", "CLI"
+  optional string integration_name = 2;
+  optional string integration_version = 3;
+}
+
+// =============================================================================
+// 2. HistoryItem (替代原 history_items_json)
+// =============================================================================
+
+// 对应 Rust 中的 ResponseItem 枚举
+message HistoryItem {
+  oneof item {
+    MessageItem message = 1;
+    FunctionCallItem function_call = 2;
+    FunctionCallOutputItem function_call_output = 3;
+    // 简化处理，暂时只映射核心类型
+  }
+}
+
+message MessageItem {
+  string role = 1; // "user" | "assistant" | "system"
+  repeated ContentItem content = 2;
+}
+
+message ContentItem {
+  oneof content {
+    string text = 1;       // InputText / OutputText
+    string image_url = 2;  // InputImage
+  }
+}
+
+message FunctionCallItem {
+  string call_id = 1;
+  string name = 2;
+  string arguments = 3; // JSON 字符串
+}
+
+message FunctionCallOutputItem {
+  string call_id = 1;
+  string output = 2;    // JSON 字符串 (包含 success/content 等)
+}
+
+// =============================================================================
+// 辅助枚举
+// =============================================================================
+
+enum ApprovalPolicy {
+  AUTO_APPROVE = 0;
+  MANUAL_APPROVE = 1;
+  BLOCK_ALL = 2;
+}
+
+enum SandboxPolicy {
+  READ_ONLY = 0;
+  SANDBOXED = 1;
+  INSECURE = 2; // 慎用
 }
 
 message UserInput {
@@ -42,7 +201,7 @@ message RunTaskResponse {
     PROCESSING = 5;
   }
   Status status = 1;
-  repeated string new_items_json = 2;
+  repeated string new_items_json = 2; // 响应仍保持 JSON 以简化
   string final_response = 3;
   TokenUsage usage = 4;
   string error_message = 5;
@@ -57,26 +216,17 @@ message TokenUsage {
 
 message ChatRequest {
   oneof payload {
-    // 握手帧：客户端发送的第一条消息，包含配置
-    string session_config_json = 1;
-
-    // 音频帧：持续推送的 PCM/Opus 数据
+    // 握手帧: 使用强类型 SessionConfig (与 RunTask 统一)
+    SessionConfig session_config = 1;
     bytes audio_chunk = 2;
-
-    // 文本帧：用户插话或纯文本交互
     string text_chunk = 3;
   }
 }
 
 message ChatResponse {
   oneof payload {
-    // STT 中间结果 (例如 "今天...")
     string stt_intermediate = 1;
-
-    // 智能体回答增量 (LLM Token)
     string agent_response_delta = 2;
-
-    // 错误信息
     string error_message = 3;
   }
 }
