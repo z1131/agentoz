@@ -41,6 +41,7 @@ public class AgentManagerServiceImpl implements AgentManagerService {
         String conversationId = UUID.randomUUID().toString();
         log.info("创建新会话: conversationId={}, userId={}", conversationId, request.getUserId());
 
+        // 1. 创建会话实体
         ConversationEntity conversation = ConversationEntity.builder()
                 .conversationId(conversationId)
                 .userId(request.getUserId())
@@ -53,6 +54,28 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 .build();
 
         conversationRepository.insert(conversation);
+
+        // 2. 创建 Primary Agent (必填)
+        // 根据新规范，创建会话时必须同时创建主智能体
+        if (request.getPrimaryAgent() != null) {
+            log.info("初始化 Primary Agent: {}", request.getPrimaryAgent().getAgentName());
+            request.getPrimaryAgent().setConversationId(conversationId);
+            // 复用 defineAgent 逻辑创建实例
+            defineAgent(request.getPrimaryAgent());
+        } else {
+            // 兼容性处理：如果未传 primaryAgent，仅记录警告（或抛出异常视业务严格程度而定）
+            log.warn("createConversation 请求未包含 primaryAgent，创建了一个空会话。请尽快适配新 API。");
+        }
+
+        // 3. 创建 Sub Agents (可选)
+        if (request.getSubAgents() != null && !request.getSubAgents().isEmpty()) {
+            log.info("初始化 {} 个 Sub Agents", request.getSubAgents().size());
+            for (AgentDefineRequest subAgentReq : request.getSubAgents()) {
+                subAgentReq.setConversationId(conversationId);
+                defineAgent(subAgentReq);
+            }
+        }
+
         return conversationId;
     }
 

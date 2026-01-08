@@ -3,6 +3,7 @@ package com.deepknow.agentoz.api.dto;
 import lombok.Data;
 
 import java.io.Serializable;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,4 +34,15 @@ public class ConversationCreateRequest implements Serializable {
      * 扩展元数据
      */
     private Map<String, Object> metadata;
+
+    /**
+     * 主智能体定义 (必填)
+     * 会话创建时自动初始化的核心智能体
+     */
+    private AgentDefineRequest primaryAgent;
+
+    /**
+     * 辅助智能体列表 (选填)
+     */
+    private List<AgentDefineRequest> subAgents;
 }
