@@ -18,6 +18,11 @@
         </encoder>
     </appender>
 
+    <!-- 默认配置 -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
     <!-- 生产环境启用 SLS -->
     <springProfile name="prod">
         <appender name="SLS" class="com.aliyun.openservices.log.logback.LoghubAppender">
@@ -49,6 +54,10 @@
                 <level>INFO</level>
             </filter>
         </appender>
+        
+        <root level="INFO">
+            <appender-ref ref="SLS"/>
+        </root>
     </springProfile>
 
     <root level="INFO">
