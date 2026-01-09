@@ -50,6 +50,11 @@
                 <scope>import</scope>
             </dependency>
             <dependency>
+                <groupId>org.apache.dubbo</groupId>
+                <artifactId>dubbo-reactive</artifactId>
+                <version>${dubbo.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>com.deepknow</groupId>
                 <artifactId>agentoz-starter</artifactId>
                 <version>${project.version}</version>

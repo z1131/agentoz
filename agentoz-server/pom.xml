@@ -41,6 +41,10 @@
             <artifactId>dubbo-spring-boot-starter</artifactId>
             <version>${dubbo.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo-reactive</artifactId>
+        </dependency>
 
         <!-- Nacos Client (Dubbo Config Center 需要) -->
         <dependency>
