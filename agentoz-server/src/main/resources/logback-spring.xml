@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name"/>
+    <!-- 从 Nacos 读取 LogStore 配置 -->
+    <springProperty scope="context" name="SLS_LOGSTORE" source="sls.logstore"/>
+
+    <!-- 生产环境启用 SLS -->
+    <springProfile name="prod">
+        <appender name="SLS" class="com.aliyun.openservices.log.logback.LoghubAppender">
+            <!-- 基础配置：从系统环境变量读取 (/etc/deepknow.env) -->
+            <endpoint>${SLS_ENDPOINT}</endpoint>
+            <accessKeyId>${SLS_ACCESS_KEY_ID}</accessKeyId>
+            <accessKeySecret>${SLS_ACCESS_KEY_SECRET}</accessKeySecret>
+            <project>${SLS_PROJECT}</project>
+            
+            <!-- 业务配置：从 Nacos 读取 -->
+            <logStore>${SLS_LOGSTORE}</logStore>
+            
+            <topic>${APP_NAME}</topic>
+            <source>${HOSTNAME}</source>
+            <totalSizeInBytes>104857600</totalSizeInBytes>
+            <maxBlockMs>0</maxBlockMs>
+            <ioThreadCount>8</ioThreadCount>
+            <batchSizeThresholdInBytes>524288</batchSizeThresholdInBytes>
+            <batchCountThreshold>4096</batchCountThreshold>
+            <lingerMs>2000</lingerMs>
+            <retries>10</retries>
+            <baseRetryBackoffMs>100</baseRetryBackoffMs>
+            <maxRetryBackoffMs>50000</maxRetryBackoffMs>
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>INFO</level>
+            </filter>
+        </appender>
+    </springProfile>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <springProfile name="prod">
+            <appender-ref ref="SLS"/>
+        </springProfile>
+    </root>
+</configuration>
