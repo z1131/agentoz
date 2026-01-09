@@ -139,6 +139,30 @@
                 </exclusion>
             </exclusions>
         </dependency>
+
+        <!-- 全链路追踪 (Micrometer Tracing + Brave) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+        </dependency>
+        <!-- Dubbo 链路追踪适配 -->
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo-spring-boot-observability-starter</artifactId>
+            <version>${dubbo.version}</version>
+        </dependency>
+        <!-- 异步上下文传递 (Flux/Mono) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>context-propagation</artifactId>
+            <version>1.1.0</version>
+        </dependency>
+        <!-- MDC 适配 -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
     </dependencies>
 
     <build>

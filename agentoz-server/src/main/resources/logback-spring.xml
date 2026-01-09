@@ -7,6 +7,17 @@
     <!-- 从 Nacos 读取 LogStore 配置 -->
     <springProperty scope="context" name="SLS_LOGSTORE" source="sls.logstore"/>
 
+    <!-- 定义通用的日志格式，包含 TraceID -->
+    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %level [%thread] [%X{traceId:-},%X{spanId:-}] %logger{36} - %msg%n"/>
+
+    <!-- 控制台输出 -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
     <!-- 生产环境启用 SLS -->
     <springProfile name="prod">
         <appender name="SLS" class="com.aliyun.openservices.log.logback.LoghubAppender">
@@ -30,6 +41,10 @@
             <retries>10</retries>
             <baseRetryBackoffMs>100</baseRetryBackoffMs>
             <maxRetryBackoffMs>50000</maxRetryBackoffMs>
+            <!-- 关键：配置 encoder 才能自定义格式 -->
+            <encoder>
+                <pattern>${LOG_PATTERN}</pattern>
+            </encoder>
             <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
                 <level>INFO</level>
             </filter>
