@@ -32,3 +32,7 @@ dubbo:
     password: ${NACOS_PASSWORD:nacos}
     parameters:
       namespace: ${NACOS_NAMESPACE:public}
+  # 序列化安全配置 - 允许响应式流和异常类
+  serialization:
+    security:
+      mode: WARNING
