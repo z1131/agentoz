@@ -18,13 +18,6 @@ spring:
           - dataId: agentoz.yaml
             group: ${NACOS_GROUP:DEEPKNOW_GROUP}
             refresh: true
-      discovery:
-        enabled: true
-        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
-        namespace: ${NACOS_NAMESPACE:public}
-        username: ${NACOS_USERNAME:nacos}
-        password: ${NACOS_PASSWORD:nacos}
-        group: ${NACOS_GROUP:DEEPKNOW_GROUP}
 
 dubbo:
   application:
