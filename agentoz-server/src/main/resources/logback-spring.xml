@@ -18,11 +18,6 @@
         </encoder>
     </appender>
 
-    <!-- 默认配置 -->
-    <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
-    </root>
-
     <!-- 生产环境启用 SLS -->
     <springProfile name="prod">
         <appender name="SLS" class="com.aliyun.openservices.log.logback.LoghubAppender">
@@ -31,10 +26,10 @@
             <accessKeyId>${SLS_ACCESS_KEY_ID}</accessKeyId>
             <accessKeySecret>${SLS_ACCESS_KEY_SECRET}</accessKeySecret>
             <project>${SLS_PROJECT}</project>
-            
+
             <!-- 业务配置：改为从环境变量读取 (需在部署脚本中注入 SLS_LOGSTORE) -->
             <logStore>${SLS_LOGSTORE}</logStore>
-            
+
             <topic>${APP_NAME}</topic>
             <source>${HOSTNAME}</source>
             <totalSizeInBytes>104857600</totalSizeInBytes>
@@ -54,15 +49,13 @@
                 <level>INFO</level>
             </filter>
         </appender>
-        
-        <root level="INFO">
-            <appender-ref ref="SLS"/>
-        </root>
     </springProfile>
 
+    <!-- 默认配置：所有环境都有 CONSOLE -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
         <springProfile name="prod">
+            <!-- 在 prod 环境下，root logger 追加 SLS -->
             <appender-ref ref="SLS"/>
         </springProfile>
     </root>
