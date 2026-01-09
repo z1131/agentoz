@@ -16,7 +16,7 @@
             <accessKeySecret>${SLS_ACCESS_KEY_SECRET}</accessKeySecret>
             <project>${SLS_PROJECT}</project>
             
-            <!-- 业务配置：从 Nacos 读取 -->
+            <!-- 业务配置：改为从环境变量读取 (需在部署脚本中注入 SLS_LOGSTORE) -->
             <logStore>${SLS_LOGSTORE}</logStore>
             
             <topic>${APP_NAME}</topic>
