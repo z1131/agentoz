@@ -1,24 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
-    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
 
     <springProperty scope="context" name="APP_NAME" source="spring.application.name"/>
     <!-- 从 Nacos 读取 LogStore 配置 -->
     <springProperty scope="context" name="SLS_LOGSTORE" source="sls.logstore"/>
 
-    <!-- 定义通用的日志格式，包含 TraceID -->
-    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %level [%thread] [%X{traceId:-},%X{spanId:-}] %logger{36} - %msg%n"/>
-
-    <!-- 控制台输出 -->
+    <!-- 控制台输出 - 保留可读性更好的文本格式 -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>${LOG_PATTERN}</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %level [%thread] [%X{traceId:-},%X{spanId:-}] %logger{36} - %msg%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
 
-    <!-- 生产环境启用 SLS -->
+    <!-- 默认配置 -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!-- 生产环境启用 SLS - 使用JSON格式 -->
     <springProfile name="prod">
         <appender name="SLS" class="com.aliyun.openservices.log.logback.LoghubAppender">
             <!-- 基础配置：从系统环境变量读取 (/etc/deepknow.env) -->
@@ -41,22 +42,27 @@
             <retries>10</retries>
             <baseRetryBackoffMs>100</baseRetryBackoffMs>
             <maxRetryBackoffMs>50000</maxRetryBackoffMs>
-            <!-- 关键：配置 encoder 才能自定义格式 -->
-            <encoder>
-                <pattern>${LOG_PATTERN}</pattern>
+
+            <!-- 使用JSON encoder，SLS会自动解析字段 -->
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <!-- 自定义字段 -->
+                <customFields>{"service":"deepknow","app":"${APP_NAME}"}</customFields>
+                <!-- 包含MDC值（traceId、spanId等） -->
+                <includeMdc>true</includeMdc>
+                <!-- 包含调用者信息 -->
+                <includeCallerData>false</includeCallerData>
+                <!-- 使用UTC时间 -->
+                <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSS'Z'</timestampPattern>
             </encoder>
+
             <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
                 <level>INFO</level>
             </filter>
         </appender>
-    </springProfile>
 
-    <!-- 默认配置：所有环境都有 CONSOLE -->
-    <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
-        <springProfile name="prod">
-            <!-- 在 prod 环境下，root logger 追加 SLS -->
+        <!-- 在 prod 环境下，root logger 追加 SLS -->
+        <root level="INFO">
             <appender-ref ref="SLS"/>
-        </springProfile>
-    </root>
+        </root>
+    </springProfile>
 </configuration>
