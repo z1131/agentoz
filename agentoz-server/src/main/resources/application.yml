@@ -9,3 +9,9 @@ management:
     baggage:
       correlation:
         enabled: true
+
+# Spring Boot 3.x 自动将traceId/spanId注入MDC
+logging:
+  pattern:
+    correlation: "[%X{traceId:-},%X{spanId:-}] "
+  include-application-name: false
