@@ -2,6 +2,11 @@ spring:
   main:
     allow-bean-definition-overriding: true
 
+dubbo:
+  # 配置服务发现使用与Nacos Discovery相同的group
+  registry:
+    group: ${NACOS_GROUP:DEEPKNOW_GROUP}
+
 management:
   tracing:
     sampling:
