@@ -24,7 +24,6 @@ dubbo:
     name: agentoz
   protocol:
     name: tri
-    serialization: protobuf  # 使用 Protobuf 序列化,符合 gRPC 标准
     port: 20883
   registry:
     address: nacos://${NACOS_SERVER_ADDR:127.0.0.1:8848}
