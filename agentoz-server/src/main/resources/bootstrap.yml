@@ -24,6 +24,7 @@ dubbo:
     name: agentoz
   protocol:
     name: tri
+    serialization: protobuf  # 使用 Protobuf 序列化,符合 gRPC 标准
     port: 20883
   registry:
     address: nacos://${NACOS_SERVER_ADDR:127.0.0.1:8848}
@@ -32,7 +33,7 @@ dubbo:
     password: ${NACOS_PASSWORD:nacos}
     parameters:
       namespace: ${NACOS_NAMESPACE:public}
-  # 序列化安全配置 - 允许响应式流和异常类
+  # 序列化安全配置 - 内部服务使用 PERMISSIVE 模式
   serialization:
     security:
-      mode: WARNING
+      mode: PERMISSIVE  # 允许所有 Protobuf 类型,避免 LazyStringArrayList 问题
