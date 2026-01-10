@@ -58,7 +58,7 @@ import java.util.Map;
  * @see com.deepknow.agentoz.infra.client.CodexAgentClient
  */
 @Slf4j
-@DubboService(protocol = "tri")
+@DubboService(protocol = "tri", timeout = 300000)
 public class AgentExecutionServiceImpl implements AgentExecutionService {
 
     @Autowired
@@ -136,10 +136,16 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                         public void onNext(codex.agent.RunTaskResponse proto) {
                             try {
                                 // Proto -> DTO
-                                log.info("收到Codex响应: conversationId={}, status={}, textDeltaLength={}",
+                                log.info("收到Codex响应: conversationId={}, status={}, textDeltaLength={}, newItemsCount={}",
                                         agent.getConversationId(),
                                         proto.getStatus().name(),
-                                        proto.getTextDelta().length());
+                                        proto.getTextDelta().length(),
+                                        proto.getNewItemsJsonCount());
+                                
+                                if (proto.getNewItemsJsonCount() > 0) {
+                                    log.info("Codex返回的新Item: {}", proto.getNewItemsJsonList());
+                                }
+                                
                                 TaskResponse dto = TaskResponseProtoConverter.toTaskResponse(proto);
                                 log.info("转换完成: status={}, textDelta={}, newItemsCount={}",
                                         dto.getStatus(),
