@@ -249,6 +249,7 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 // 高级配置
                 .modelOverrides(modelOverrides)  // 转换后的Server层DTO
                 .mcpServers(mcpServers)  // 转换后的Server层DTO Map
+                .mcpConfigJson(apiConfig.getMcpConfigJson()) // 👈 增加透传字段
                 .sessionSource(sessionSource)  // 转换后的Server层DTO
                 // 元数据
                 .isTemplate(false)
