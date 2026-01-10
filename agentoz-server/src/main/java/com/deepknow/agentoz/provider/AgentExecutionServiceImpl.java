@@ -146,8 +146,7 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                     errorResponse.setStatus("ERROR");
                     errorResponse.setErrorMessage(error.getMessage());
                     return Flux.just(errorResponse);
-                })
-                .contextCapture();
+                });
     }
 
     @Override
