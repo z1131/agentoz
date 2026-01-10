@@ -70,8 +70,40 @@ message SessionConfig {
   // --- 模型能力覆盖 (Model Overrides) ---
   optional ModelOverrides model_overrides = 9;
 
+  // --- MCP 配置 (JSON 格式) ---
+  // JSON 格式的 MCP 服务器配置，直接使用 codex 的 McpServerConfig 结构
+  // 支持两种格式：
+  // 1. {"mcp_servers": {"server_name": {...}}}
+  // 2. {"server_name": {...}}
+  //
+  // 每个 MCP 服务器配置支持的字段（参考 codex McpServerConfig）：
+  // - transport (必需): stdio 或 streamable_http
+  //   * stdio: {"command": "npx", "args": ["-y", "@server"], "env": {...}, "cwd": "..."}
+  //   * streamable_http: {"url": "...", "bearer_token_env_var": "...", "http_headers": {...}}
+  // - enabled (可选): 是否启用，默认 true
+  // - startup_timeout_sec (可选): 启动超时（秒）
+  // - tool_timeout_sec (可选): 工具调用超时（秒）
+  // - enabled_tools (可选): 启用的工具白名单
+  // - disabled_tools (可选): 禁用的工具黑名单
+  //
+  // 示例：
+  // {
+  //   "mcp_servers": {
+  //     "filesystem": {
+  //       "command": "npx",
+  //       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"],
+  //       "enabled": true,
+  //       "tool_timeout_sec": 30
+  //     },
+  //     "github": {
+  //       "url": "https://api.github.com/mcp",
+  //       "bearer_token_env_var": "GITHUB_TOKEN"
+  //     }
+  //   }
+  // }
+  optional string mcp_config_json = 15;
+
   // --- 扩展配置 ---
-  map<string, McpServerConfig> mcp_servers = 10; // 动态注入 MCP 服务器
   optional SessionSource session_source = 11;    // 调用来源标识
 }
 
@@ -118,12 +150,6 @@ message ModelOverrides {
 
   // 自动压缩历史的阈值
   optional uint64 auto_compact_token_limit = 5;
-}
-
-message McpServerConfig {
-  string command = 1;          // e.g., "npx", "docker"
-  repeated string args = 2;    // e.g., ["-y", "@modelcontextprotocol/server-git"]
-  map<string, string> env = 3; // 环境变量
 }
 
 message SessionSource {

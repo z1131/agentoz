@@ -1,17 +1,11 @@
 package com.deepknow.agentoz.infra.converter.grpc;
 
-import com.deepknow.agentoz.api.dto.McpServerConfigDTO;
-import com.deepknow.agentoz.dto.config.McpServerConfigVO;
 import com.deepknow.agentoz.dto.config.ModelOverridesVO;
 import com.deepknow.agentoz.dto.config.ProviderConfigVO;
 import com.deepknow.agentoz.dto.config.SessionSourceVO;
 import codex.agent.*;
 import com.deepknow.agentoz.model.AgentConfigEntity;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-
-import java.util.Map;
 
 /**
  * 实体到Proto的转换器
@@ -24,7 +18,7 @@ import java.util.Map;
  *   ├─ provider              →    ProviderConfig
  *   ├─ approvalPolicy (String) → ApprovalPolicy (Enum)
  *   ├─ reasoningEffort (String) → ReasoningEffort (Enum)
- *   └─ mcpServers (Map)       →    map&lt;string, McpServerConfig&gt;
+ *   └─ mcpConfigJson (JSON)   →    mcp_config_json (string)
  * </pre>
  *
  * @see AgentConfigEntity
@@ -32,8 +26,6 @@ import java.util.Map;
  */
 @Slf4j
 public class ConfigProtoConverter {
-
-    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 将AgentConfigEntity转换为SessionConfig (Proto)
@@ -97,34 +89,10 @@ public class ConfigProtoConverter {
             builder.setModelOverrides(toModelOverrides(entity.getModelOverrides()));
         }
 
-        // 7. MCP服务器配置 (优先使用 mcpConfigJson)
+        // 7. MCP服务器配置 (直接传递 JSON 字符串)
         if (entity.getMcpConfigJson() != null && !entity.getMcpConfigJson().isEmpty()) {
-            try {
-                JsonNode rootNode = objectMapper.readTree(entity.getMcpConfigJson());
-                // 兼容逻辑：如果 JSON 包含 "mcpServers" 根节点，则进入该节点解析
-                JsonNode configNode = rootNode.has("mcpServers") ? rootNode.get("mcpServers") : rootNode;
-                
-                Map<String, McpServerConfigDTO> mcpDtoMap = objectMapper.convertValue(
-                        configNode,
-                        new TypeReference<Map<String, McpServerConfigDTO>>() {}
-                );
-                
-                mcpDtoMap.forEach((name, config) -> {
-                    McpServerConfig mcpProto = toMcpServerFromDto(config);
-                    builder.putMcpServers(name, mcpProto);
-                });
-                log.info("从JSON解析MCP配置成功: count={}", mcpDtoMap.size());
-            } catch (Exception e) {
-                log.error("解析MCP JSON配置失败: {}", entity.getMcpConfigJson(), e);
-            }
-        } 
-        
-        // 回退逻辑：如果 map 为空且 mcpServers 字段有值，则使用旧字段
-        if (builder.getMcpServersCount() == 0 && entity.getMcpServers() != null && !entity.getMcpServers().isEmpty()) {
-            entity.getMcpServers().forEach((name, config) -> {
-                McpServerConfig mcpProto = toMcpServerConfig(config);
-                builder.putMcpServers(name, mcpProto);
-            });
+            builder.setMcpConfigJson(entity.getMcpConfigJson());
+            log.debug("设置MCP配置JSON: length={}", entity.getMcpConfigJson().length());
         }
 
         // 8. 会话来源
@@ -158,48 +126,6 @@ public class ConfigProtoConverter {
         }
         if (apiProvider.getWireApi() != null) {
             builder.setWireApi(apiProvider.getWireApi());
-        }
-
-        return builder.build();
-    }
-
-    /**
-     * 转换McpServerConfig (从 VO)
-     */
-    private static McpServerConfig toMcpServerConfig(McpServerConfigVO apiConfig) {
-        if (apiConfig == null) {
-            return McpServerConfig.getDefaultInstance();
-        }
-
-        McpServerConfig.Builder builder = McpServerConfig.newBuilder()
-                .setCommand(apiConfig.getCommand());
-
-        if (apiConfig.getArgs() != null) {
-            builder.addAllArgs(apiConfig.getArgs());
-        }
-        if (apiConfig.getEnv() != null) {
-            builder.putAllEnv(apiConfig.getEnv());
-        }
-
-        return builder.build();
-    }
-
-    /**
-     * 转换McpServerConfig (从 DTO)
-     */
-    private static McpServerConfig toMcpServerFromDto(McpServerConfigDTO apiConfig) {
-        if (apiConfig == null) {
-            return McpServerConfig.getDefaultInstance();
-        }
-
-        McpServerConfig.Builder builder = McpServerConfig.newBuilder()
-                .setCommand(apiConfig.getCommand());
-
-        if (apiConfig.getArgs() != null) {
-            builder.addAllArgs(apiConfig.getArgs());
-        }
-        if (apiConfig.getEnv() != null) {
-            builder.putAllEnv(apiConfig.getEnv());
         }
 
         return builder.build();
