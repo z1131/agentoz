@@ -100,10 +100,15 @@ public class ConfigProtoConverter {
         // 7. MCP服务器配置 (优先使用 mcpConfigJson)
         if (entity.getMcpConfigJson() != null && !entity.getMcpConfigJson().isEmpty()) {
             try {
-                Map<String, McpServerConfigDTO> mcpDtoMap = objectMapper.readValue(
-                        entity.getMcpConfigJson(),
+                JsonNode rootNode = objectMapper.readTree(entity.getMcpConfigJson());
+                // 兼容逻辑：如果 JSON 包含 "mcpServers" 根节点，则进入该节点解析
+                JsonNode configNode = rootNode.has("mcpServers") ? rootNode.get("mcpServers") : rootNode;
+                
+                Map<String, McpServerConfigDTO> mcpDtoMap = objectMapper.convertValue(
+                        configNode,
                         new TypeReference<Map<String, McpServerConfigDTO>>() {}
                 );
+                
                 mcpDtoMap.forEach((name, config) -> {
                     McpServerConfig mcpProto = toMcpServerFromDto(config);
                     builder.putMcpServers(name, mcpProto);
@@ -111,7 +116,6 @@ public class ConfigProtoConverter {
                 log.info("从JSON解析MCP配置成功: count={}", mcpDtoMap.size());
             } catch (Exception e) {
                 log.error("解析MCP JSON配置失败: {}", entity.getMcpConfigJson(), e);
-                // 不抛出异常，尝试回退到旧字段
             }
         } 
         
