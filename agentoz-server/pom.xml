@@ -45,6 +45,12 @@
             <groupId>org.apache.dubbo</groupId>
             <artifactId>dubbo-reactive</artifactId>
         </dependency>
+        <!-- Dubbo Protobuf 序列化 -->
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo-serialization-protobuf</artifactId>
+            <version>${dubbo.version}</version>
+        </dependency>
 
         <!-- Nacos Client (Dubbo Config Center 需要) -->
         <dependency>
