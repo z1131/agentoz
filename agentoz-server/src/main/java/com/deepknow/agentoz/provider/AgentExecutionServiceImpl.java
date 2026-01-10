@@ -92,9 +92,17 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             }
 
             // Debug日志: 检查从数据库读取的 JSON
-            log.info("从DB加载配置: configId={}, mcpJsonLen={}", 
-                    config.getConfigId(), 
-                    config.getMcpConfigJson() != null ? config.getMcpConfigJson().length() : "NULL");
+            String mcpJson = config.getMcpConfigJson();
+            log.info("从DB加载配置: configId={}, mcpJsonLen={}",
+                    config.getConfigId(),
+                    mcpJson != null ? mcpJson.length() : "NULL");
+
+            // 打印实际的 MCP 配置内容（用于调试）
+            if (mcpJson != null && !mcpJson.isEmpty()) {
+                log.info("MCP配置内容: {}", mcpJson);
+            } else {
+                log.warn("MCP配置为空!");
+            }
 
             // 4. 从AgentEntity的activeContext加载计算上下文
             List<HistoryItem> historyItems = parseActiveContext(agent.getActiveContext());
