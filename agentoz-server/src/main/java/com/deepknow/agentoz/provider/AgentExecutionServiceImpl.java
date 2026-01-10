@@ -136,9 +136,17 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                         public void onNext(codex.agent.RunTaskResponse proto) {
                             try {
                                 // Proto -> DTO
+                                log.info("收到Codex响应: conversationId={}, status={}, textDeltaLength={}",
+                                        agent.getConversationId(),
+                                        proto.getStatus().name(),
+                                        proto.getTextDelta().length());
                                 TaskResponse dto = TaskResponseProtoConverter.toTaskResponse(proto);
-                                log.debug("收到任务响应: agentId={}, status={}", finalAgentId, dto.getStatus());
+                                log.info("转换完成: status={}, textDelta={}, newItemsCount={}",
+                                        dto.getStatus(),
+                                        dto.getTextDelta(),
+                                        dto.getNewItemsJson() != null ? dto.getNewItemsJson().size() : 0);
                                 responseObserver.onNext(dto);
+                                log.info("已发送响应给paper");
                             } catch (Exception e) {
                                 log.error("响应转换或发送失败", e);
                                 // 这里是否要onError取决于业务是否允许部分失败，通常建议onError
