@@ -91,6 +91,11 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 throw new AgentOzException(AgentOzErrorCode.CONFIG_NOT_FOUND, agent.getConfigId());
             }
 
+            // Debug日志: 检查从数据库读取的 JSON
+            log.info("从DB加载配置: configId={}, mcpJsonLen={}", 
+                    config.getConfigId(), 
+                    config.getMcpConfigJson() != null ? config.getMcpConfigJson().length() : "NULL");
+
             // 4. 从AgentEntity的activeContext加载计算上下文
             List<HistoryItem> historyItems = parseActiveContext(agent.getActiveContext());
 

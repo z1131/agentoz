@@ -219,6 +219,13 @@ public class AgentManagerServiceImpl implements AgentManagerService {
     private String createAgentConfig(AgentConfigDTO apiConfig) {
         String configId = "cfg-" + UUID.randomUUID().toString();
 
+        if (apiConfig.getMcpConfigJson() != null) {
+            log.info("AgentManager 收到 mcpConfigJson (len={}): {}", 
+                    apiConfig.getMcpConfigJson().length(), apiConfig.getMcpConfigJson());
+        } else {
+            log.warn("AgentManager 收到 mcpConfigJson 为空! ConfigName={}", apiConfig.getConfigName());
+        }
+
         // 转换API层DTO到Server层VO (Assembler)
         var provider = ConfigApiAssembler.toProviderConfig(apiConfig.getProvider());
         var modelOverrides = ConfigApiAssembler.toModelOverrides(apiConfig.getModelOverrides());
@@ -256,6 +263,10 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
+
+        log.info("即将保存 ConfigEntity: configId={}, mcpJsonLen={}", 
+                configId, 
+                configEntity.getMcpConfigJson() != null ? configEntity.getMcpConfigJson().length() : "NULL");
 
         agentConfigRepository.insert(configEntity);
         return configId;
