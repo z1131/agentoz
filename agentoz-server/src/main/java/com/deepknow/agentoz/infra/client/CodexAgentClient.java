@@ -8,7 +8,6 @@ import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.Flux;
 
 import java.util.List;
 
@@ -20,7 +19,7 @@ import java.util.List;
  *
  * <h3>🔄 核心方法</h3>
  * <ul>
- *   <li>{@link #runTask(String, AgentConfigEntity, List, String)} - 执行Agent任务（流式返回）</li>
+ *   <li>{@link #runTask(String, AgentConfigEntity, List, String, StreamObserver)} - 执行Agent任务（流式返回）</li>
  * </ul>
  *
  * @see CodexAgentRpcService
@@ -50,21 +49,21 @@ public class CodexAgentClient {
      * 1. AgentConfigEntity → SessionConfig (Proto)
      * 2. List&lt;MessageDTO&gt; → List&lt;HistoryItem&gt; (Proto)
      * 3. 构建 RunTaskRequest
-     * 4. 通过 Dubbo Triple 调用 Codex-Agent
-     * 5. 流式返回 RunTaskResponse
+     * 4. 通过 Dubbo Triple 调用 Codex-Agent (StreamObserver回调)
      * </pre>
      *
      * @param conversationId 会话ID（对齐Codex-Agent的conversation_id）
      * @param config Agent配置实体
      * @param history 历史消息列表（强类型）
      * @param inputText 用户输入文本
-     * @return 流式响应
+     * @param responseObserver 响应流观察者
      */
-    public Flux<RunTaskResponse> runTask(
+    public void runTask(
             String conversationId,
             AgentConfigEntity config,
             List<HistoryItem> history,
-            String inputText
+            String inputText,
+            StreamObserver<RunTaskResponse> responseObserver
     ) {
         // 1. 转换配置为Proto
         SessionConfig sessionConfig = ConfigProtoConverter.toSessionConfig(config);
@@ -82,32 +81,16 @@ public class CodexAgentClient {
                 .setInput(userInput)
                 .build();
 
-        // 4. 发起Dubbo Triple调用
-        return Flux.create(sink -> {
-            log.info("发起 Codex-Agent 调用: conversationId={}, llmModel={}",
-                    conversationId, config.getLlmModel());
+        // 4. 发起Dubbo Triple调用 (直接透传Observer)
+        log.info("发起 Codex-Agent 调用: conversationId={}, llmModel={}",
+                conversationId, config.getLlmModel());
 
-            agentRpcService.runTask(request, new StreamObserver<RunTaskResponse>() {
-                @Override
-                public void onNext(RunTaskResponse value) {
-                    log.debug("收到 Codex-Agent 响应: status={}, textDelta={}",
-                            value.getStatus(), value.getTextDelta());
-                    sink.next(value);
-                }
-
-                @Override
-                public void onError(Throwable t) {
-                    log.error("Codex-Agent 调用异常: conversationId={}", conversationId, t);
-                    sink.error(t);
-                }
-
-                @Override
-                public void onCompleted() {
-                    log.info("Codex-Agent 调用完成: conversationId={}", conversationId);
-                    sink.complete();
-                }
-            });
-        });
+        try {
+            agentRpcService.runTask(request, responseObserver);
+        } catch (Exception e) {
+            log.error("Codex-Agent 调用异常: conversationId={}", conversationId, e);
+            responseObserver.onError(e);
+        }
     }
 
     /**

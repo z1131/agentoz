@@ -5,7 +5,6 @@ import com.deepknow.agentoz.api.dto.StreamChatRequest;
 import com.deepknow.agentoz.api.dto.StreamChatResponse;
 import com.deepknow.agentoz.api.dto.TaskResponse;
 import org.apache.dubbo.common.stream.StreamObserver;
-import reactor.core.publisher.Flux;
 
 /**
  * Agent 执行服务 (数据面)
@@ -27,25 +26,24 @@ public interface AgentExecutionService {
      * 执行单次任务指令 (Unary Input -> Server Stream)
      * 对应 Codex 的 RunTask 模式
      *
-     * <h3>🔄 响应式流式返回</h3>
+     * <h3>🔄 原生流式返回 (StreamObserver)</h3>
      * <pre>
-     * Flux&lt;TaskResponse&gt; 流式返回:
-     *   1. 思考过程
-     *   2. 工具调用
-     *   3. 部分回复
-     *   4. 最终完成
+     * StreamObserver&lt;TaskResponse&gt; 流式回调:
+     *   1. onNext: 接收思考过程、工具调用、回复片段
+     *   2. onError: 异常处理
+     *   3. onCompleted: 任务结束
      * </pre>
      *
      * @param request 任务请求（指定 Agent 和输入消息）
-     * @return 响应流（包含思考过程、工具调用、最终回复）
+     * @param responseObserver 响应流观察者
      */
-    Flux<TaskResponse> executeTask(ExecuteTaskRequest request);
+    void executeTask(ExecuteTaskRequest request, StreamObserver<TaskResponse> responseObserver);
 
     /**
      * 全双工实时交互任务 (Bidirectional Stream)
      * 对应 Codex 的 RealtimeChat 模式
      *
-     * <p>TODO: 后续改造成 Flux&lt;&gt; Flux 双向流</p>
+     * <p>TODO: 后续改造成 StreamObserver 双向流</p>
      *
      * @param responseObserver 响应流（实时语音/文本结果）
      * @return 请求流（用于持续推送语音数据或文本插话）
