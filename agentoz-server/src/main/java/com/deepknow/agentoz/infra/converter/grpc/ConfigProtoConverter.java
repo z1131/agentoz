@@ -1,12 +1,17 @@
 package com.deepknow.agentoz.infra.converter.grpc;
 
+import com.deepknow.agentoz.api.dto.McpServerConfigDTO;
 import com.deepknow.agentoz.dto.config.McpServerConfigVO;
 import com.deepknow.agentoz.dto.config.ModelOverridesVO;
 import com.deepknow.agentoz.dto.config.ProviderConfigVO;
 import com.deepknow.agentoz.dto.config.SessionSourceVO;
 import codex.agent.*;
 import com.deepknow.agentoz.model.AgentConfigEntity;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+
+import java.util.Map;
 
 /**
  * 实体到Proto的转换器
@@ -27,6 +32,8 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class ConfigProtoConverter {
+
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 将AgentConfigEntity转换为SessionConfig (Proto)
@@ -90,8 +97,26 @@ public class ConfigProtoConverter {
             builder.setModelOverrides(toModelOverrides(entity.getModelOverrides()));
         }
 
-        // 7. MCP服务器配置
-        if (entity.getMcpServers() != null && !entity.getMcpServers().isEmpty()) {
+        // 7. MCP服务器配置 (优先使用 mcpConfigJson)
+        if (entity.getMcpConfigJson() != null && !entity.getMcpConfigJson().isEmpty()) {
+            try {
+                Map<String, McpServerConfigDTO> mcpDtoMap = objectMapper.readValue(
+                        entity.getMcpConfigJson(),
+                        new TypeReference<Map<String, McpServerConfigDTO>>() {}
+                );
+                mcpDtoMap.forEach((name, config) -> {
+                    McpServerConfig mcpProto = toMcpServerFromDto(config);
+                    builder.putMcpServers(name, mcpProto);
+                });
+                log.info("从JSON解析MCP配置成功: count={}", mcpDtoMap.size());
+            } catch (Exception e) {
+                log.error("解析MCP JSON配置失败: {}", entity.getMcpConfigJson(), e);
+                // 不抛出异常，尝试回退到旧字段
+            }
+        } 
+        
+        // 回退逻辑：如果 map 为空且 mcpServers 字段有值，则使用旧字段
+        if (builder.getMcpServersCount() == 0 && entity.getMcpServers() != null && !entity.getMcpServers().isEmpty()) {
             entity.getMcpServers().forEach((name, config) -> {
                 McpServerConfig mcpProto = toMcpServerConfig(config);
                 builder.putMcpServers(name, mcpProto);
@@ -135,9 +160,30 @@ public class ConfigProtoConverter {
     }
 
     /**
-     * 转换McpServerConfig
+     * 转换McpServerConfig (从 VO)
      */
     private static McpServerConfig toMcpServerConfig(McpServerConfigVO apiConfig) {
+        if (apiConfig == null) {
+            return McpServerConfig.getDefaultInstance();
+        }
+
+        McpServerConfig.Builder builder = McpServerConfig.newBuilder()
+                .setCommand(apiConfig.getCommand());
+
+        if (apiConfig.getArgs() != null) {
+            builder.addAllArgs(apiConfig.getArgs());
+        }
+        if (apiConfig.getEnv() != null) {
+            builder.putAllEnv(apiConfig.getEnv());
+        }
+
+        return builder.build();
+    }
+
+    /**
+     * 转换McpServerConfig (从 DTO)
+     */
+    private static McpServerConfig toMcpServerFromDto(McpServerConfigDTO apiConfig) {
         if (apiConfig == null) {
             return McpServerConfig.getDefaultInstance();
         }

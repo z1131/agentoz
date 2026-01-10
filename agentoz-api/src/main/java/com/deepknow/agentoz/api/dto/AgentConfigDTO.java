@@ -137,6 +137,14 @@ public class AgentConfigDTO implements Serializable {
     private Map<String, McpServerConfigDTO> mcpServers;
 
     /**
+     * MCP服务器配置 (JSON 字符串格式)
+     * <p>直接透传业务侧配置的原始 JSON，避免手动组装对象。</p>
+     * 优先级高于 mcpServers 字段。
+     * <p>格式示例: { "filesystem": { "command": "npx", "args": ["..."], "env": {...} } }</p>
+     */
+    private String mcpConfigJson;
+
+    /**
      * 会话来源标识
      * 包含: source_type ("API", "IDE", "CLI"), integration_name等
      */

@@ -187,6 +187,13 @@ public class AgentConfigEntity {
     private Map<String, McpServerConfigVO> mcpServers;
 
     /**
+     * MCP服务器配置 (JSON 字符串格式)
+     * <p>直接透传业务侧配置的原始 JSON。</p>
+     * 优先级高于 mcpServers 字段。
+     */
+    private String mcpConfigJson;
+
+    /**
      * 会话来源标识
      * 对应Proto: SessionSource session_source
      */
