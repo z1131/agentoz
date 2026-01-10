@@ -53,7 +53,7 @@ public class TaskResponseProtoConverter {
 
         // 4. 结构化条目
         if (protoResponse.getNewItemsJsonCount() > 0) {
-            dto.setNewItemsJson(protoResponse.getNewItemsJsonList());
+            dto.setNewItemsJson(new ArrayList<>(protoResponse.getNewItemsJsonList()));
         }
 
         // 5. Token使用统计
