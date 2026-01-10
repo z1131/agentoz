@@ -125,13 +125,13 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             log.info("Agent配置加载完成: agentId={}, llmModel={}, conversationId={}, historySize={}",
                     finalAgentId, config.getLlmModel(), agent.getConversationId(), historyItems.size());
 
-            // 5. 调用Codex-Agent计算节点 (gRPC Observer -> Dubbo Observer 桥接)
+            // 5. 调用Codex-Agent计算节点 (Dubbo Observer 透传)
             codexAgentClient.runTask(
                     agent.getConversationId(),
                     config,
                     historyItems,
                     request.getMessage(),
-                    new io.grpc.stub.StreamObserver<com.deepknow.agentoz.infra.adapter.grpc.RunTaskResponse>() {
+                    new org.apache.dubbo.common.stream.StreamObserver<com.deepknow.agentoz.infra.adapter.grpc.RunTaskResponse>() {
                         @Override
                         public void onNext(com.deepknow.agentoz.infra.adapter.grpc.RunTaskResponse proto) {
                             try {

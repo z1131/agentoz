@@ -1,10 +1,9 @@
 package com.deepknow.agentoz.infra.client;
 
-import com.deepknow.agentoz.infra.adapter.grpc.CodexAgentRpcService;
 import com.deepknow.agentoz.infra.adapter.grpc.*;
 import com.deepknow.agentoz.infra.converter.grpc.ConfigProtoConverter;
 import com.deepknow.agentoz.model.AgentConfigEntity;
-import io.grpc.stub.StreamObserver;
+import org.apache.dubbo.common.stream.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.stereotype.Component;
@@ -15,14 +14,14 @@ import java.util.List;
  * Codex Agent 客户端
  * 负责与 codex-agent (Rust) 服务进行通信 (via Dubbo Triple Protocol)
  *
- * <p>通过 {@link CodexAgentRpcService} 接口,使用 Dubbo Triple 协议调用外部 Rust gRPC 服务。</p>
+ * <p>通过 {@link DubboAgentServiceTriple.AgentService} 接口,使用 Dubbo Triple 协议调用外部 Rust gRPC 服务。</p>
  *
  * <h3>🔄 核心方法</h3>
  * <ul>
  *   <li>{@link #runTask(String, AgentConfigEntity, List, String, StreamObserver)} - 执行Agent任务（流式返回）</li>
  * </ul>
  *
- * @see CodexAgentRpcService
+ * @see DubboAgentServiceTriple
  * @see AgentConfigEntity
  */
 @Slf4j
@@ -30,14 +29,14 @@ import java.util.List;
 public class CodexAgentClient {
 
     @DubboReference(
-            interfaceClass = CodexAgentRpcService.class,
+            interfaceClass = AgentService.class,
             // 关键：强制指定直连 URL，从 Nacos 配置读取
             url = "tri://${codex.agent.host}:${codex.agent.port}",
             protocol = "tri",
             check = false,
             timeout = 600000
     )
-    private CodexAgentRpcService agentRpcService;
+    private AgentService agentRpcService;
 
     /**
      * 执行代理任务 (流式返回)
