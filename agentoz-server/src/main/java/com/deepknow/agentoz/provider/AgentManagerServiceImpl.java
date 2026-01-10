@@ -219,17 +219,19 @@ public class AgentManagerServiceImpl implements AgentManagerService {
     private String createAgentConfig(AgentConfigDTO apiConfig) {
         String configId = "cfg-" + UUID.randomUUID().toString();
 
+        log.info("========== createAgentConfig 开始 ==========");
+        log.info("API Config: configName={}, llmModel={}", apiConfig.getConfigName(), apiConfig.getLlmModel());
+
         if (apiConfig.getMcpConfigJson() != null) {
-            log.info("AgentManager 收到 mcpConfigJson (len={}): {}", 
+            log.info("API Config 收到 mcpConfigJson (len={}): {}",
                     apiConfig.getMcpConfigJson().length(), apiConfig.getMcpConfigJson());
         } else {
-            log.warn("AgentManager 收到 mcpConfigJson 为空! ConfigName={}", apiConfig.getConfigName());
+            log.warn("API Config 的 mcpConfigJson 为空! ConfigName={}", apiConfig.getConfigName());
         }
 
         // 转换API层DTO到Server层VO (Assembler)
         var provider = ConfigApiAssembler.toProviderConfig(apiConfig.getProvider());
         var modelOverrides = ConfigApiAssembler.toModelOverrides(apiConfig.getModelOverrides());
-        var mcpServers = ConfigApiAssembler.toMcpServerConfigMap(apiConfig.getMcpServers());
         var sessionSource = ConfigApiAssembler.toSessionSource(apiConfig.getSessionSource());
 
         // 构建配置实体
@@ -255,8 +257,7 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 .compactPrompt(apiConfig.getCompactPrompt())
                 // 高级配置
                 .modelOverrides(modelOverrides)  // 转换后的Server层DTO
-                .mcpServers(mcpServers)  // 转换后的Server层DTO Map
-                .mcpConfigJson(apiConfig.getMcpConfigJson()) // 👈 增加透传字段
+                .mcpConfigJson(apiConfig.getMcpConfigJson()) // ✅ 直接使用 JSON 字符串
                 .sessionSource(sessionSource)  // 转换后的Server层DTO
                 // 元数据
                 .isTemplate(false)
@@ -264,11 +265,13 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 .updatedAt(LocalDateTime.now())
                 .build();
 
-        log.info("即将保存 ConfigEntity: configId={}, mcpJsonLen={}", 
-                configId, 
-                configEntity.getMcpConfigJson() != null ? configEntity.getMcpConfigJson().length() : "NULL");
+        log.info("即将保存 ConfigEntity: configId={}, mcpJsonLen={}",
+                configId,
+                configEntity.getMcpConfigJson() != null ? configEntity.getMcpConfigJson().length() : 0);
 
         agentConfigRepository.insert(configEntity);
+        log.info("========== createAgentConfig 完成 ==========");
+
         return configId;
     }
 }
