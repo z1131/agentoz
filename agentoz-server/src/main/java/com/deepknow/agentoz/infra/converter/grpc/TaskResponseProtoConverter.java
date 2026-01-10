@@ -1,29 +1,13 @@
 package com.deepknow.agentoz.infra.converter.grpc;
 
 import com.deepknow.agentoz.api.dto.TaskResponse;
-import com.deepknow.agentoz.infra.adapter.grpc.RunTaskResponse;
-import com.deepknow.agentoz.infra.adapter.grpc.TokenUsage;
+import codex.agent.RunTaskResponse;
+import codex.agent.TokenUsage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * Proto消息转DTO转换器
- *
- * <p>负责将Codex-Agent的Proto响应消息转换为API层DTO。</p>
- *
- * <h3>🔄 转换映射</h3>
- * <pre>
- * RunTaskResponse (Proto)    →  TaskResponse (API DTO)
- *   ├─ status                →   status (String)
- *   ├─ text_delta            →   textDelta (String)
- *   ├─ reasoning_delta       →   reasoningDelta (String)
- *   ├─ final_response        →   finalResponse (String)
- *   ├─ new_items_json        →   newItemsJson (List&lt;String&gt;)
- *   └─ usage                 →   usage (TaskResponse.Usage)
- * </pre>
- *
- * @see RunTaskResponse
- * @see TaskResponse
+ * 任务响应转换器
  */
 @Slf4j
 @Component

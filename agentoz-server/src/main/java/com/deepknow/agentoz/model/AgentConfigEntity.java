@@ -49,7 +49,7 @@ import java.util.Map;
  * </pre>
  *
  * @see AgentEntity
- * @see com.deepknow.agentoz.infra.adapter.grpc.AgentProtos.SessionConfig
+ * @see codex.agent.AgentProtos.SessionConfig
  */
 @Data
 @Builder

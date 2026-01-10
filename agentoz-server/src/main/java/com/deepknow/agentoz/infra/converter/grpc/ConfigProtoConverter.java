@@ -4,7 +4,7 @@ import com.deepknow.agentoz.dto.config.McpServerConfigVO;
 import com.deepknow.agentoz.dto.config.ModelOverridesVO;
 import com.deepknow.agentoz.dto.config.ProviderConfigVO;
 import com.deepknow.agentoz.dto.config.SessionSourceVO;
-import com.deepknow.agentoz.infra.adapter.grpc.*;
+import codex.agent.*;
 import com.deepknow.agentoz.model.AgentConfigEntity;
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,7 +23,7 @@ import lombok.extern.slf4j.Slf4j;
  * </pre>
  *
  * @see AgentConfigEntity
- * @see com.deepknow.agentoz.infra.adapter.grpc.SessionConfig
+ * @see codex.agent.SessionConfig
  */
 @Slf4j
 public class ConfigProtoConverter {

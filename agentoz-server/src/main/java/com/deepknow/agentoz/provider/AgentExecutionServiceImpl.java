@@ -11,7 +11,7 @@ import com.deepknow.agentoz.infra.converter.grpc.HistoryProtoConverter;
 import com.deepknow.agentoz.infra.client.CodexAgentClient;
 import com.deepknow.agentoz.infra.repo.AgentConfigRepository;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
-import com.deepknow.agentoz.infra.adapter.grpc.HistoryItem;
+import codex.agent.HistoryItem;
 import com.deepknow.agentoz.model.AgentConfigEntity;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -131,9 +131,9 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                     config,
                     historyItems,
                     request.getMessage(),
-                    new org.apache.dubbo.common.stream.StreamObserver<com.deepknow.agentoz.infra.adapter.grpc.RunTaskResponse>() {
+                    new org.apache.dubbo.common.stream.StreamObserver<codex.agent.RunTaskResponse>() {
                         @Override
-                        public void onNext(com.deepknow.agentoz.infra.adapter.grpc.RunTaskResponse proto) {
+                        public void onNext(codex.agent.RunTaskResponse proto) {
                             try {
                                 // Proto -> DTO
                                 TaskResponse dto = TaskResponseProtoConverter.toTaskResponse(proto);

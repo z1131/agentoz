@@ -7,7 +7,7 @@ package codex.agent;
 // =============================================================================
 
 // ✅ Java 专用配置 (不影响 Rust)
-option java_package = "com.deepknow.agentoz.infra.adapter.grpc";
+option java_package = "codex.agent";
 option java_outer_classname = "AgentProtos";
 option java_multiple_files = true;
 option java_generate_equals_and_hash = true;

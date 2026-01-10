@@ -1,6 +1,6 @@
 package com.deepknow.agentoz.infra.client;
 
-import com.deepknow.agentoz.infra.adapter.grpc.*;
+import codex.agent.*;
 import com.deepknow.agentoz.infra.converter.grpc.ConfigProtoConverter;
 import com.deepknow.agentoz.model.AgentConfigEntity;
 import org.apache.dubbo.common.stream.StreamObserver;
