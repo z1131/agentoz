@@ -33,7 +33,7 @@ public class McpServerProperties {
     /**
      * Streamable-HTTP 端点路径
      */
-    private String httpEndpoint = "/mcp/agent";
+    private String httpEndpoint = "/mcp/agent/message";
 
     /**
      * SSE 端点路径
