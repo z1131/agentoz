@@ -96,7 +96,7 @@ public class ConfigProtoConverter {
                     entity.getMcpConfigJson().length(),
                     entity.getMcpConfigJson());
         } else {
-            log.warn("⚠️ MCP配置JSON为空或null! entity.mcpConfigJson={}", entity.getMcpConfigJson());
+            log.warn("MCP配置JSON为空或null! entity.mcpConfigJson={}", entity.getMcpConfigJson());
         }
 
         // 8. 会话来源

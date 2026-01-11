@@ -49,7 +49,7 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
     @Autowired
     private JwtUtils jwtUtils;
 
-    private final String websiteUrl = "https://agentoz.deepknow.com";
+    private final String websiteUrl = "https://agentoz.deepknow.online";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
