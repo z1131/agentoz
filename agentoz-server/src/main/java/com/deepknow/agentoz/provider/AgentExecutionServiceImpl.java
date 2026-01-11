@@ -141,8 +141,8 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             ObjectNode sysMcpConfig = objectMapper.createObjectNode();
             // 适配 Codex 偏好的 streamable_http 模式
             sysMcpConfig.put("type", "streamable_http");
-            // 使用少爷指定的公网域名
-            sysMcpConfig.put("url", "https://agentoz.deepknow.online/mcp/sys/sse");
+            // 使用新的 MCP SDK Server 端点（基于官方 MCP Java SDK）
+            sysMcpConfig.put("url", "https://agentoz.deepknow.online/mcp/agent/message");
             
             ObjectNode headers = sysMcpConfig.putObject("http_headers");
             headers.put("Authorization", "Bearer " + token);

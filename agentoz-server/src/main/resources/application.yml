@@ -23,3 +23,12 @@ logging:
   pattern:
     correlation: "[%X{traceId:-},%X{spanId:-}] "
   include-application-name: false
+
+# MCP Server 配置
+mcp:
+  server:
+    enabled: true
+    server-name: agentoz
+    server-version: 1.0.0
+    http-endpoint: /mcp/agent/message
+    sse-endpoint: /mcp/agent/sse
