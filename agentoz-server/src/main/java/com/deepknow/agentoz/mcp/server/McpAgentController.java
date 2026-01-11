@@ -1,7 +1,9 @@
 package com.deepknow.agentoz.mcp.server;
 
+import io.modelcontextprotocol.server.McpStatelessSyncServer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -21,7 +23,7 @@ import org.springframework.web.bind.annotation.*;
 public class McpAgentController {
 
     @Autowired
-    private AgentOzMcpServer agentOzMcpServer;
+    private ApplicationContext applicationContext;
 
     /**
      * 健康检查端点
@@ -31,7 +33,7 @@ public class McpAgentController {
     @GetMapping("/health")
     public String health() {
         try {
-            agentOzMcpServer.getMcpServer();
+            McpStatelessSyncServer server = getMcpServer();
             return "{\"status\":\"ok\",\"server\":\"agentoz-mcp\",\"version\":\"1.0.0\"}";
         } catch (Exception e) {
             return "{\"status\":\"error\",\"message\":\"" + e.getMessage() + "\"}";
@@ -46,7 +48,7 @@ public class McpAgentController {
     @GetMapping("/info")
     public String info() {
         try {
-            var server = agentOzMcpServer.getMcpServer();
+            McpStatelessSyncServer server = getMcpServer();
             var serverInfo = server.getServerInfo();
             var capabilities = server.getServerCapabilities();
 
@@ -62,5 +64,12 @@ public class McpAgentController {
             log.error("获取服务器信息失败", e);
             return "{\"error\":\"" + e.getMessage() + "\"}";
         }
+    }
+
+    /**
+     * 从 Spring 容器中获取 MCP Server Bean
+     */
+    private McpStatelessSyncServer getMcpServer() {
+        return applicationContext.getBean(McpStatelessSyncServer.class);
     }
 }
