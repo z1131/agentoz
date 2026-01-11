@@ -137,8 +137,13 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             ObjectNode serversNode = rootNode.has("mcp_servers") ? (ObjectNode) rootNode.get("mcp_servers") : rootNode.putObject("mcp_servers");
             String token = jwtUtils.generateToken(agentId, conversationId);
             
+            // 构建 System MCP 配置
             ObjectNode sysMcpConfig = objectMapper.createObjectNode();
-            sysMcpConfig.put("url", websiteUrl + "/mcp/sys/sse");
+            // 关键：必须指定 type 为 sse，否则 Codex 可能会误用 POST 请求导致 405
+            sysMcpConfig.put("type", "sse");
+            // 使用少爷指定的公网域名
+            sysMcpConfig.put("url", "https://agentoz.deepknow.online/mcp/sys/sse");
+            
             ObjectNode headers = sysMcpConfig.putObject("http_headers");
             headers.put("Authorization", "Bearer " + token);
             

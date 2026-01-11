@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 @RestController
 @RequestMapping("/mcp/sys")
+@CrossOrigin(origins = "*") // 允许跨域
 public class McpSystemController {
 
     @Autowired
@@ -48,7 +49,11 @@ public class McpSystemController {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, SseEmitter> activeEmitters = new ConcurrentHashMap<>();
 
-    @GetMapping("/sse")
+    /**
+     * 1. MCP SSE 握手端点
+     * 增加对 OPTIONS 和 POST 的宽容处理
+     */
+    @RequestMapping(value = "/sse", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.OPTIONS})
     public SseEmitter connect() {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
         String sessionId = java.util.UUID.randomUUID().toString();
