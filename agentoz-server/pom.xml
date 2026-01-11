@@ -120,52 +120,24 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>net.devh</groupId>
-            <artifactId>grpc-client-spring-boot-starter</artifactId>
-            <version>2.15.0.RELEASE</version>
-        </dependency>
 
-        <!-- Aliyun SLS -->
+        <!-- JWT Support -->
         <dependency>
-            <groupId>com.aliyun.openservices</groupId>
-            <artifactId>aliyun-log-logback-appender</artifactId>
-            <version>0.1.18</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.google.protobuf</groupId>
-                    <artifactId>protobuf-java</artifactId>
-                </exclusion>
-            </exclusions>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>0.11.5</version>
         </dependency>
-
-        <!-- 全链路追踪 (Micrometer Tracing + Brave) -->
         <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-tracing-bridge-brave</artifactId>
-        </dependency>
-        <!-- Dubbo 链路追踪适配 -->
-        <dependency>
-            <groupId>org.apache.dubbo</groupId>
-            <artifactId>dubbo-spring-boot-observability-starter</artifactId>
-            <version>${dubbo.version}</version>
-        </dependency>
-        <!-- 监控指标 (Prometheus) -->
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>0.11.5</version>
             <scope>runtime</scope>
         </dependency>
-        <!-- JSON日志格式 -->
         <dependency>
-            <groupId>net.logstash.logback</groupId>
-            <artifactId>logstash-logback-encoder</artifactId>
-            <version>7.4</version>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>0.11.5</version>
+            <scope>runtime</scope>
         </dependency>
     </dependencies>
 

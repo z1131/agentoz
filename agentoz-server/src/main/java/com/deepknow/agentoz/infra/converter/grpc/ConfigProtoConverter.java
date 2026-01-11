@@ -92,7 +92,7 @@ public class ConfigProtoConverter {
         // 7. MCP服务器配置 (直接传递 JSON 字符串)
         if (entity.getMcpConfigJson() != null && !entity.getMcpConfigJson().isEmpty()) {
             builder.setMcpConfigJson(entity.getMcpConfigJson());
-            log.info("✅ 设置MCP配置JSON: length={}, content={}",
+            log.info("设置MCP配置JSON: length={}, content={}",
                     entity.getMcpConfigJson().length(),
                     entity.getMcpConfigJson());
         } else {

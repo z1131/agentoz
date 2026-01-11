@@ -14,11 +14,14 @@ import com.deepknow.agentoz.infra.client.CodexAgentClient;
 import com.deepknow.agentoz.infra.repo.AgentConfigRepository;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.infra.util.StreamGuard;
+import com.deepknow.agentoz.infra.util.JwtUtils;
 import codex.agent.HistoryItem;
 import com.deepknow.agentoz.model.AgentConfigEntity;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.common.stream.StreamObserver;
 import org.apache.dubbo.config.annotation.DubboService;
@@ -42,6 +45,13 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
 
     @Autowired
     private CodexAgentClient codexAgentClient;
+    
+    @Autowired
+    private JwtUtils jwtUtils;
+
+    private final String websiteUrl = "https://agentoz.deepknow.com";
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
     public void executeTask(ExecuteTaskRequest request, StreamObserver<TaskResponse> responseObserver) {
@@ -53,12 +63,10 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
 
             log.info(">>> 收到任务请求: {}", traceInfo);
 
-            // 1. 自动寻找主智能体逻辑
             if (agentId == null || agentId.isEmpty()) {
                 if (conversationId == null || conversationId.isEmpty()) {
                     throw new AgentOzException(AgentOzErrorCode.INVALID_PARAM, "agentId 和 conversationId 不能同时为空");
                 }
-                // 查询主智能体 (isPrimary = true)
                 AgentEntity primaryAgent = agentRepository.selectOne(
                         new LambdaQueryWrapper<AgentEntity>()
                                 .eq(AgentEntity::getConversationId, conversationId)
@@ -71,7 +79,6 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 log.info("自动路由至主智能体: agentId={}", agentId);
             }
 
-            // 2. 查询Agent实体
             final String finalAgentId = agentId;
             AgentEntity agent = agentRepository.selectOne(
                     new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, finalAgentId)
@@ -81,7 +88,6 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 throw new AgentOzException(AgentOzErrorCode.AGENT_NOT_FOUND, finalAgentId);
             }
 
-            // 3. 查询Agent配置
             AgentConfigEntity config = agentConfigRepository.selectOne(
                     new LambdaQueryWrapper<AgentConfigEntity>()
                             .eq(AgentConfigEntity::getConfigId, agent.getConfigId())
@@ -91,54 +97,65 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 throw new AgentOzException(AgentOzErrorCode.CONFIG_NOT_FOUND, agent.getConfigId());
             }
 
-            // Debug日志: 检查从数据库读取的 JSON
-            String mcpJson = config.getMcpConfigJson();
-            log.info("从DB加载配置: configId={}, mcpJsonLen={}",
-                    config.getConfigId(),
-                    mcpJson != null ? mcpJson.length() : "NULL");
-
-            // 打印实际的 MCP 配置内容（用于调试）
-            if (mcpJson != null && !mcpJson.isEmpty()) {
-                log.info("MCP配置内容: {}", mcpJson);
-            } else {
-                log.warn("MCP配置为空!");
+            // 动态注入系统级 MCP
+            try {
+                String originalMcpJson = config.getMcpConfigJson();
+                String injectedMcpJson = injectSystemMcp(originalMcpJson, agent.getAgentId(), agent.getConversationId());
+                config.setMcpConfigJson(injectedMcpJson);
+            } catch (Exception e) {
+                log.error("注入系统MCP失败", e);
             }
 
-            // 4. 从AgentEntity的activeContext加载计算上下文
             List<HistoryItem> historyItems = parseActiveContext(agent.getActiveContext());
 
             log.info("准备调用Codex: agentId={}, model={}, historySize={}", 
                     finalAgentId, config.getLlmModel(), historyItems.size());
 
-            // 5. 调用Codex-Agent计算节点 (使用 StreamGuard 包装 Observer)
             codexAgentClient.runTask(
                     agent.getConversationId(),
                     config,
                     historyItems,
                     request.getMessage(),
                     StreamGuard.wrapObserver(responseObserver, proto -> {
-                        // 业务数据处理逻辑
-                        log.debug("收到Codex帧: status={}, deltaLen={}, items={}", 
-                                proto.getStatus(), proto.getTextDelta().length(), proto.getNewItemsJsonCount());
-                        
                         TaskResponse dto = TaskResponseProtoConverter.toTaskResponse(proto);
                         responseObserver.onNext(dto);
-                        
                     }, traceInfo)
             );
         }, traceInfo);
     }
+    
+    private String injectSystemMcp(String originalJson, String agentId, String conversationId) {
+        try {
+            ObjectNode rootNode;
+            if (originalJson == null || originalJson.trim().isEmpty()) {
+                rootNode = objectMapper.createObjectNode();
+            } else {
+                JsonNode node = objectMapper.readTree(originalJson);
+                rootNode = node.isObject() ? (ObjectNode) node : objectMapper.createObjectNode();
+            }
+            
+            ObjectNode serversNode = rootNode.has("mcp_servers") ? (ObjectNode) rootNode.get("mcp_servers") : rootNode.putObject("mcp_servers");
+            String token = jwtUtils.generateToken(agentId, conversationId);
+            
+            ObjectNode sysMcpConfig = objectMapper.createObjectNode();
+            sysMcpConfig.put("url", websiteUrl + "/mcp/sys/sse");
+            ObjectNode headers = sysMcpConfig.putObject("http_headers");
+            headers.put("Authorization", "Bearer " + token);
+            
+            serversNode.set("agentoz_system", sysMcpConfig);
+            return objectMapper.writeValueAsString(rootNode);
+        } catch (Exception e) {
+            log.error("Failed to inject system MCP", e);
+            return originalJson;
+        }
+    }
 
     @Override
     public StreamObserver<StreamChatRequest> streamInputExecuteTask(StreamObserver<StreamChatResponse> responseObserver) {
-        log.info("启动双向流式聊天（暂未实现）");
         return new StreamObserver<>() {
-            @Override
-            public void onNext(StreamChatRequest value) {}
-            @Override
-            public void onError(Throwable t) { responseObserver.onError(t); }
-            @Override
-            public void onCompleted() { responseObserver.onCompleted(); }
+            @Override public void onNext(StreamChatRequest value) {}
+            @Override public void onError(Throwable t) { responseObserver.onError(t); }
+            @Override public void onCompleted() { responseObserver.onCompleted(); }
         };
     }
 
@@ -147,14 +164,13 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             return List.of();
         }
         try {
-            ObjectMapper objectMapper = new ObjectMapper();
             List<com.deepknow.agentoz.dto.MessageDTO> messageDTOs = objectMapper.readValue(
                     activeContextJson,
                     new TypeReference<List<com.deepknow.agentoz.dto.MessageDTO>>() {}
             );
             return HistoryProtoConverter.toHistoryItemList(messageDTOs);
         } catch (Exception e) {
-            log.warn("解析上下文失败(非致命，将使用空上下文): {}", e.getMessage());
+            log.warn("解析上下文失败: {}", e.getMessage());
             return List.of();
         }
     }

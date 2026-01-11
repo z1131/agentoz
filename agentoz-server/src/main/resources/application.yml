@@ -2,6 +2,9 @@ spring:
   main:
     allow-bean-definition-overriding: true
 
+server:
+  port: 8083
+
 dubbo:
   # 配置服务发现使用与Nacos Discovery相同的group
   registry:
