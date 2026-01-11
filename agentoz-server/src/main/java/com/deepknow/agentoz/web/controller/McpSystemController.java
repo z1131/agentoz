@@ -50,11 +50,11 @@ public class McpSystemController {
     private final Map<String, SseEmitter> activeEmitters = new ConcurrentHashMap<>();
 
     /**
-     * 1. MCP SSE 握手端点
-     * 增加对 OPTIONS 和 POST 的宽容处理
+     * 1. 标准 MCP SSE 握手 (GET)
      */
-    @RequestMapping(value = "/sse", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.OPTIONS})
-    public SseEmitter connect() {
+    @GetMapping("/sse")
+    @CrossOrigin(origins = "*")
+    public SseEmitter connectSse() {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
         String sessionId = java.util.UUID.randomUUID().toString();
         try {
@@ -69,6 +69,28 @@ public class McpSystemController {
         }
         return emitter;
     }
+
+    /**
+     * 1.1 适配 streamable_http (POST)
+     * 某些客户端(如Codex)配置为streamable_http时，会直接向配置的URL发POST请求进行初始化。
+     * 我们将其转发给 handleMessage 处理。
+     */
+    @PostMapping("/sse")
+    @CrossOrigin(origins = "*")
+    public JsonRpcResponse handleStreamableHttpPost(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestBody JsonRpcRequest request
+    ) {
+        // 生成一个临时 sessionId，因为 streamable_http 这种模式下可能是无状态的
+        // 或者客户端后续会在 header 里带 session？
+        // 为了兼容，我们生成一个新的 sessionId
+        String sessionId = "streamable-" + java.util.UUID.randomUUID().toString();
+        return handleMessage(authHeader, sessionId, request);
+    }
+
+    /**
+     * 2. MCP 消息处理端点 (JSON-RPC)
+     */
 
     @PostMapping("/message")
     public JsonRpcResponse handleMessage(
