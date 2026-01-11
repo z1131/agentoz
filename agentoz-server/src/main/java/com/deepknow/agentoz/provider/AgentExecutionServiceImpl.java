@@ -139,8 +139,8 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             
             // 构建 System MCP 配置
             ObjectNode sysMcpConfig = objectMapper.createObjectNode();
-            // 关键：必须指定 type 为 sse，否则 Codex 可能会误用 POST 请求导致 405
-            sysMcpConfig.put("type", "streamable_http");
+            // 必须使用 sse，因为我们的后端是标准的 SSE 适配
+            sysMcpConfig.put("type", "sse");
             // 使用少爷指定的公网域名
             sysMcpConfig.put("url", "https://agentoz.deepknow.online/mcp/sys/sse");
             
