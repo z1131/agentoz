@@ -144,56 +144,54 @@ CREATE TABLE IF NOT EXISTS agent_configs (
 
     -- 业务标识
     config_id VARCHAR(64) NOT NULL UNIQUE COMMENT '配置唯一标识',
-    user_id VARCHAR(64) COMMENT '创建用户ID',
 
     -- 配置名称
     config_name VARCHAR(255) NOT NULL COMMENT '配置名称',
-    description TEXT COMMENT '配置描述',
 
-    -- LLM 配置
-    llm_provider VARCHAR(64) NOT NULL COMMENT 'LLM提供商: openai, qwen, deepseek等',
-    llm_model VARCHAR(128) NOT NULL COMMENT '模型名称，如: gpt-4o, qwen-plus',
-    llm_api_key VARCHAR(512) COMMENT 'LLM API密钥（加密存储）',
-    llm_base_url VARCHAR(512) COMMENT 'LLM API基础URL',
-
-    -- MCP 配置（JSON 格式）
-    -- 存储结构化的 MCP 服务器配置
-    mcp_config_json JSON COMMENT 'MCP配置JSON: {"mcp_servers": {"server_name": {...}}}',
-
-    -- 指令配置
-    system_instructions TEXT COMMENT '系统级指令（覆盖默认）',
-    user_instructions TEXT COMMENT '用户级指令',
-    developer_instructions TEXT COMMENT '开发者级指令（最高优先级）',
+    -- 基础环境配置
+    provider JSON COMMENT '模型提供商配置（ProviderConfigVO的JSON格式）',
+    llm_model VARCHAR(128) NOT NULL COMMENT '模型名称，如: qwen-max, gpt-4o',
+    cwd VARCHAR(512) COMMENT '工作目录（绝对路径）',
 
     -- 策略配置
     approval_policy VARCHAR(32) DEFAULT 'AUTO_APPROVE' COMMENT '审批策略: AUTO_APPROVE, MANUAL_APPROVE, BLOCK_ALL',
     sandbox_policy VARCHAR(32) DEFAULT 'READ_ONLY' COMMENT '沙箱策略: READ_ONLY, SANDBOXED, INSECURE',
 
+    -- 指令配置
+    developer_instructions TEXT COMMENT '开发者指令（最高优先级）',
+    user_instructions TEXT COMMENT '用户指令（给Agent的业务级指令）',
+    base_instructions TEXT COMMENT '基础指令模板（覆盖默认行为模板）',
+
     -- 推理配置
-    reasoning_effort VARCHAR(32) DEFAULT 'MEDIUM' COMMENT '推理努力程度: MINIMAL, LOW, MEDIUM, HIGH',
-    reasoning_summary VARCHAR(32) DEFAULT 'AUTO' COMMENT '推理摘要模式: AUTO, CONCISE, DETAILED, NONE',
+    reasoning_effort VARCHAR(32) DEFAULT 'MEDIUM' COMMENT '推理强度: REASONING_NONE, MINIMAL, LOW, MEDIUM, HIGH',
+    reasoning_summary VARCHAR(32) DEFAULT 'AUTO' COMMENT '推理摘要模式: AUTO, CONCISE, DETAILED, REASONING_SUMMARY_NONE',
+    compact_prompt TEXT COMMENT '压缩提示词覆盖',
 
-    -- 模型覆盖配置（JSON 格式）
-    model_overrides JSON COMMENT '模型能力覆盖配置（JSON格式）',
+    -- 高级配置（JSON 格式）
+    model_overrides JSON COMMENT '模型能力覆盖配置（ModelOverridesVO的JSON格式）',
+    mcp_config_json JSON COMMENT 'MCP服务器配置（JSON字符串格式）',
+    session_source JSON COMMENT '会话来源标识（SessionSourceVO的JSON格式）',
 
-    -- 状态
-    is_active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用: 1=启用, 0=禁用',
-
-    -- 扩展字段
+    -- 元数据与生命周期
+    is_template TINYINT(1) DEFAULT 0 COMMENT '是否为预设模板: 1=是, 0=否',
+    tags VARCHAR(255) COMMENT '配置标签（逗号分隔）',
+    description TEXT COMMENT '配置描述',
     metadata JSON COMMENT '扩展元数据（JSON格式）',
 
     -- 时间戳
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    last_used_at DATETIME COMMENT '最后使用时间',
+
+    -- 创建者
+    created_by VARCHAR(64) COMMENT '创建者用户ID',
 
     -- 索引
     INDEX idx_config_id (config_id),
-    INDEX idx_user_id (user_id),
-    INDEX idx_is_active (is_active),
-    INDEX idx_llm_provider (llm_provider)
+    INDEX idx_is_template (is_template)
 
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Agent配置表：存储Agent的LLM、MCP、指令等配置信息';
+COMMENT='Agent配置表：存储Agent的完整配置，对齐Codex-Agent的SessionConfig';
 
 
 -- =============================================================================
