@@ -117,7 +117,8 @@ public class McpSystemController {
                 case "initialize":
                     return handleInitialize(request);
                 case "notifications/initialized":
-                    return null;
+                    // 必须返回内容以确保 Content-Type 头存在，否则 Codex 会报错
+                    return JsonRpcResponse.success(request.getId(), "ack");
                 case "tools/list":
                     return handleListTools(request);
                 case "tools/call":
