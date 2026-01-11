@@ -26,6 +26,13 @@ public interface AgentExecutionService {
      * 执行单次任务指令 (Unary Input -> Server Stream)
      * 对应 Codex 的 RunTask 模式
      *
+     * <h3>🎯 使用场景</h3>
+     * <ul>
+     *   <li>用户发起的对话（自动路由到主智能体）</li>
+     *   <li>用户消息会追加到会话历史（所有 Agent 共享）</li>
+     *   <li>用户消息会追加到该会话的所有 Agent 的 activeContext</li>
+     * </ul>
+     *
      * <h3>🔄 原生流式返回 (StreamObserver)</h3>
      * <pre>
      * StreamObserver&lt;TaskResponse&gt; 流式回调:
@@ -34,10 +41,42 @@ public interface AgentExecutionService {
      *   3. onCompleted: 任务结束
      * </pre>
      *
-     * @param request 任务请求（指定 Agent 和输入消息）
+     * @param request 任务请求（conversationId 必填，agentId 可选）
      * @param responseObserver 响应流观察者
      */
     void executeTask(ExecuteTaskRequest request, StreamObserver<TaskResponse> responseObserver);
+
+    /**
+     * 执行单次任务指令 - 发送给特定智能体
+     *
+     * <h3>🎯 使用场景</h3>
+     * <ul>
+     *   <li>Agent 间相互调用（Agent A → Agent B）</li>
+     *   <li>用户消息只追加到目标 Agent 的 activeContext</li>
+     *   <li>不追加到会话历史（因为是 Agent 间调用）</li>
+     *   <li>不影响其他 Agent 的上下文</li>
+     * </ul>
+     *
+     * <h3>🔄 与 executeTask 的区别</h3>
+     * <pre>
+     * executeTask:
+     *   - 自动路由到主智能体
+     *   - 追加到会话历史（conversation.historyContext）
+     *   - 追加到所有 Agent 的上下文（all agents.activeContext）
+     *
+     * executeTaskToSingleAgent:
+     *   - 直接使用指定的 Agent
+     *   - 不追加到会话历史
+     *   - 只追加到该 Agent 的上下文
+     * </pre>
+     *
+     * @param agentId 目标 Agent ID（必填）
+     * @param conversationId 会话 ID（必填）
+     * @param message 输入消息（必填）
+     * @param responseObserver 响应流观察者
+     */
+    void executeTaskToSingleAgent(String agentId, String conversationId, String message,
+                                  StreamObserver<TaskResponse> responseObserver);
 
     /**
      * 全双工实时交互任务 (Bidirectional Stream)

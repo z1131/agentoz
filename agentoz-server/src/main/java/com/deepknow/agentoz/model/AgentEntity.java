@@ -76,12 +76,13 @@ public class AgentEntity {
      * Agent显示名称
      * 示例: "代码助手", "数据分析专家"
      */
+    @TableField("agent_name")
     private String agentName;
 
     /**
      * 是否主Agent
      */
-    @TableField("agent_type")
+    @TableField("is_primary")
     private Boolean isPrimary;
 
     /**

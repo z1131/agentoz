@@ -73,11 +73,14 @@ CREATE TABLE IF NOT EXISTS agents (
     conversation_id VARCHAR(64) NOT NULL COMMENT '所属会话ID',
     config_id VARCHAR(64) NOT NULL COMMENT '关联的配置ID',
 
-    -- Agent 类型
+    -- 业务属性
+    agent_name VARCHAR(255) COMMENT 'Agent显示名称，如: "代码助手", "数据分析专家"',
     is_primary TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否为主智能体: 1=是, 0=否',
+    description TEXT COMMENT 'Agent描述',
+    priority INT DEFAULT 5 COMMENT '优先级（用于多Agent调度），范围1-10，数字越大优先级越高',
 
     -- Agent 状态
-    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'Agent状态: ACTIVE, INACTIVE, ERROR',
+    state VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'Agent状态: ACTIVE, INACTIVE, ERROR',
 
     -- ⭐ 核心 1: Agent 级别的交互历史（JSON 数组格式）
     -- 存储与该 Agent 相关的所有交互，包含：
@@ -85,6 +88,7 @@ CREATE TABLE IF NOT EXISTS agents (
     -- - 该 Agent 的所有响应
     -- - 其他 Agent 调用该 Agent 的消息
     -- 更新策略：每次该 Agent 被调用和返回时都追加
+    full_history JSON COMMENT '全量历史记录（JSON格式，已废弃，建议使用 activeContext）',
     active_context JSON NOT NULL COMMENT 'Agent交互历史JSON数组: [{"message":{...}}, {"function_call":{...}}, ...]',
     context_format VARCHAR(32) DEFAULT 'history_items_v1' COMMENT '上下文格式版本',
 
@@ -108,13 +112,17 @@ CREATE TABLE IF NOT EXISTS agents (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     last_activity_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最后活动时间',
+    last_used_at DATETIME COMMENT '最后使用时间',
+
+    -- 创建者
+    created_by VARCHAR(64) COMMENT '创建者用户ID',
 
     -- 索引
     INDEX idx_agent_id (agent_id),
     INDEX idx_conversation_id (conversation_id),
     INDEX idx_config_id (config_id),
     INDEX idx_is_primary (is_primary),
-    INDEX idx_status (status),
+    INDEX idx_state (state),
     INDEX idx_created_at (created_at),
     INDEX idx_conversation_primary (conversation_id, is_primary),
 
