@@ -79,7 +79,8 @@ public class StreamGuard {
             @Override
             public void onError(Throwable t) {
                 log.error("上游流异常 [{}]: {}", traceInfo, t.getMessage());
-                sendError(downstream, AgentOzErrorCode.CODEX_STREAM_ERROR.getCode(), t.getMessage());
+                // 不要立即调用 onCompleted，而是传递错误给下游
+                downstream.onError(t);
             }
 
             @Override
