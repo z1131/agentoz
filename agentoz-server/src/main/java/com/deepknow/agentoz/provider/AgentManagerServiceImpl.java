@@ -48,6 +48,15 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 .businessCode(request.getBusinessCode())
                 .title(request.getTitle())
                 .status("ACTIVE")
+                // 初始化历史相关字段
+                .historyContext("[]")  // 空数组
+                .historyFormat("history_items_v1")
+                .messageCount(0)
+                .lastMessageContent(null)
+                .lastMessageType(null)
+                .lastMessageAt(null)
+                .metadata(null)
+                // 时间戳
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .lastActivityAt(LocalDateTime.now())
@@ -114,8 +123,18 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 .agentName(request.getAgentName())
                 .isPrimary(request.getIsPrimary())
                 .description(request.getDescription())
-                .state("IDLE")
+                .state("ACTIVE")
+                // 初始化上下文相关字段
+                .activeContext("[]")  // 空数组
+                .contextFormat("history_items_v1")
+                .stateDescription(null)
+                .interactionCount(0)
+                .lastInteractionType(null)
+                .lastInteractionAt(null)
+                // 其他字段
                 .priority(priority)
+                .metadata(null)
+                // 时间戳
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .lastUsedAt(LocalDateTime.now())
