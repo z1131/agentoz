@@ -2,10 +2,10 @@ package com.deepknow.agentoz.mcp.server;
 
 import com.deepknow.agentoz.mcp.config.McpServerProperties;
 import com.deepknow.agentoz.mcp.tool.CallAgentTool;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.server.transport.HttpServletStatelessServerTransport;
-import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.spec.McpSchema;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -32,6 +32,9 @@ public class AgentOzMcpServer {
     @Autowired
     private CallAgentTool callAgentTool;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     private io.modelcontextprotocol.server.McpStatelessSyncServer mcpServer;
 
     /**
@@ -49,10 +52,11 @@ public class AgentOzMcpServer {
                     properties.getServerName(),
                     properties.getServerVersion());
 
-            // 创建传输层
+            // 创建传输层（必须设置 ObjectMapper）
             HttpServletStatelessServerTransport transport =
                     HttpServletStatelessServerTransport.builder()
                             .messageEndpoint(properties.getHttpEndpoint())
+                            .objectMapper(objectMapper)  // ✅ 必须设置 ObjectMapper
                             .build();
 
             // 创建工具规范
