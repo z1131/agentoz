@@ -15,6 +15,8 @@ import com.deepknow.agentoz.infra.repo.AgentConfigRepository;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.infra.util.StreamGuard;
 import com.deepknow.agentoz.infra.util.JwtUtils;
+import com.deepknow.agentoz.infra.history.ConversationHistoryManager;
+import com.deepknow.agentoz.infra.history.AgentContextManager;
 import codex.agent.HistoryItem;
 import com.deepknow.agentoz.model.AgentConfigEntity;
 import com.deepknow.agentoz.model.AgentEntity;
@@ -45,9 +47,15 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
 
     @Autowired
     private CodexAgentClient codexAgentClient;
-    
+
     @Autowired
     private JwtUtils jwtUtils;
+
+    @Autowired
+    private ConversationHistoryManager conversationHistoryManager;
+
+    @Autowired
+    private AgentContextManager agentContextManager;
 
     private final String websiteUrl = "https://agentoz.deepknow.online";
 
@@ -56,10 +64,11 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
     @Override
     public void executeTask(ExecuteTaskRequest request, StreamObserver<TaskResponse> responseObserver) {
         String traceInfo = "ConvId=" + request.getConversationId();
-        
+
         StreamGuard.run(responseObserver, () -> {
             String agentId = request.getAgentId();
             String conversationId = request.getConversationId();
+            String userMessage = request.getMessage();
 
             log.info(">>> 收到任务请求: {}", traceInfo);
 
@@ -97,6 +106,12 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 throw new AgentOzException(AgentOzErrorCode.CONFIG_NOT_FOUND, agent.getConfigId());
             }
 
+            // ✅ 步骤 1: 记录用户消息到会话历史（所有 Agent 共享）
+            conversationHistoryManager.appendUserMessage(conversationId, userMessage);
+
+            // ✅ 步骤 2: 记录 Agent 被调用状态
+            agentContextManager.onAgentCalled(finalAgentId, userMessage);
+
             // 动态注入系统级 MCP
             try {
                 String originalMcpJson = config.getMcpConfigJson();
@@ -108,16 +123,27 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
 
             List<HistoryItem> historyItems = parseActiveContext(agent.getActiveContext());
 
-            log.info("准备调用Codex: agentId={}, model={}, historySize={}", 
+            log.info("准备调用Codex: agentId={}, model={}, historySize={}",
                     finalAgentId, config.getLlmModel(), historyItems.size());
 
+            // ✅ 步骤 3: 调用 Codex-Agent，并在响应返回时记录历史
             codexAgentClient.runTask(
                     agent.getConversationId(),
                     config,
                     historyItems,
-                    request.getMessage(),
+                    userMessage,
                     StreamGuard.wrapObserver(responseObserver, proto -> {
+                        // 每次收到响应时
                         TaskResponse dto = TaskResponseProtoConverter.toTaskResponse(proto);
+
+                        // ✅ 记录 Assistant 响应到会话历史
+                        if (dto.getFinalResponse() != null && !dto.getFinalResponse().isEmpty()) {
+                            conversationHistoryManager.appendAssistantMessage(conversationId, dto.getFinalResponse());
+
+                            // ✅ 记录 Agent 返回状态
+                            agentContextManager.onAgentResponse(finalAgentId, dto.getFinalResponse());
+                        }
+
                         responseObserver.onNext(dto);
                     }, traceInfo)
             );

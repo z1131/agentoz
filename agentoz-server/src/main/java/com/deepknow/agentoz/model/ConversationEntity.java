@@ -58,9 +58,61 @@ public class ConversationEntity {
 
     /**
      * 会话级的全量历史上下文 (JSON)
-     * 用于记录整个会话的演进过程（可能包含多个 Agent 的协作）
+     *
+     * <p>存储该会话的完整历史，包含：</p>
+     * <ul>
+     *   <li>所有用户输入消息 (MessageItem with role=user)</li>
+     *   <li>所有 Agent 响应消息 (MessageItem with role=assistant)</li>
+     *   <li>所有函数调用记录 (FunctionCallItem)</li>
+     *   <li>所有函数返回结果 (FunctionCallOutputItem)</li>
+     * </ul>
+     *
+     * <p>格式：JSON 数组，每个元素是一个 HistoryItem</p>
+     * <pre>
+     * [
+     *   {"message": {"role": "user", "content": [{"text": "帮我查天气"}]}},
+     *   {"function_call": {"call_id": "call_123", "name": "get_weather", "arguments": "{...}"}},
+     *   {"function_call_output": {"call_id": "call_123", "output": "{...}"}},
+     *   {"message": {"role": "assistant", "content": [{"text": "北京今天晴天"}]}}
+     * ]
+     * </pre>
+     *
+     * <p>更新策略：每次有新的用户输入或 Agent 返回时追加</p>
      */
-    private String fullHistoryContext;
+    private String historyContext;
+
+    /**
+     * 历史格式版本
+     *
+     * <p>用于标识 historyContext 的数据格式版本，便于未来升级迁移</p>
+     */
+    private String historyFormat;
+
+    /**
+     * 历史消息总数
+     *
+     * <p>用于快速判断上下文长度，避免频繁解析 JSON</p>
+     */
+    private Integer messageCount;
+
+    /**
+     * 最后一条消息内容
+     *
+     * <p>用于会话列表展示，只保留最后一条消息的纯文本内容</p>
+     */
+    private String lastMessageContent;
+
+    /**
+     * 最后一条消息类型
+     *
+     * <p>可能的值: message, function_call, function_call_output</p>
+     */
+    private String lastMessageType;
+
+    /**
+     * 最后一条消息的时间戳
+     */
+    private LocalDateTime lastMessageAt;
 
     /**
      * 扩展元数据 (JSON)

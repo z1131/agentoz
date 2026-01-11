@@ -95,15 +95,42 @@ public class AgentEntity {
 
     /**
      * 全量历史记录（JSON格式）
-     * 包含该Agent参与的所有对话历史
+     *
+     * <p>包含该Agent参与的所有对话历史（已废弃，建议使用 activeContext）</p>
      */
+    @Deprecated
     private String fullHistory;
 
     /**
      * 活跃上下文（JSON格式）
-     * 当前对话窗口的上下文摘要
+     *
+     * <p>存储与该 Agent 相关的所有交互，包含：</p>
+     * <ul>
+     *   <li>用户直接发送给该 Agent 的消息 (MessageItem)</li>
+     *   <li>该 Agent 的所有响应 (MessageItem)</li>
+     *   <li>其他 Agent 调用该 Agent 的消息 (MessageItem/FunctionCallItem)</li>
+     *   <li>该 Agent 调用工具的记录 (FunctionCallItem)</li>
+     *   <li>工具返回的结果 (FunctionCallOutputItem)</li>
+     * </ul>
+     *
+     * <p>格式：JSON 数组，每个元素是一个 HistoryItem</p>
+     * <pre>
+     * [
+     *   {"message": {"role": "user", "content": [{"text": "帮我查天气"}]}},
+     *   {"message": {"role": "assistant", "content": [{"text": "好的，我来查询"}]}},
+     *   {"function_call": {"call_id": "call_123", "name": "get_weather", "arguments": "{...}"}},
+     *   {"function_call_output": {"call_id": "call_123", "output": "{...}"}}
+     * ]
+     * </pre>
+     *
+     * <p>更新策略：每次该 Agent 被调用和返回时都追加</p>
      */
     private String activeContext;
+
+    /**
+     * 上下文格式版本
+     */
+    private String contextFormat;
 
     // ============================================================
     // 状态与生命周期 - State & Lifecycle
@@ -111,9 +138,48 @@ public class AgentEntity {
 
     /**
      * Agent运行状态
-     * 枚举: "IDLE", "RUNNING", "PAUSED", "ERROR", "TERMINATED"
+     * 枚举: "ACTIVE", "INACTIVE", "ERROR"
      */
     private String state;
+
+    /**
+     * Agent 状态描述（新增）
+     *
+     * <p>记录 Agent 被调用时的输入摘要和执行结果摘要</p>
+     *
+     * <p>更新策略：</p>
+     * <ul>
+     *   <li>Agent 被调用时：更新为输入摘要，例如 "正在处理天气查询任务"</li>
+     *   <li>Agent 返回时：追加执行结果，例如 "正在处理天气查询任务 | 已完成：北京晴天25°C"</li>
+     * </ul>
+     *
+     * <p>格式示例：</p>
+     * <pre>
+     * "输入: 帮我查北京天气"
+     * "输入: 帮我查北京天气 | 输出: 正在调用天气服务..."
+     * "输入: 帮我查北京天气 | 输出: 北京今天晴天，温度25°C"
+     * </pre>
+     */
+    private String stateDescription;
+
+    /**
+     * 交互次数统计
+     *
+     * <p>该 Agent 的总交互次数（调用+返回）</p>
+     */
+    private Integer interactionCount;
+
+    /**
+     * 最后交互类型
+     *
+     * <p>可能的值: input(被调用), output(返回), error(错误)</p>
+     */
+    private String lastInteractionType;
+
+    /**
+     * 最后交互时间
+     */
+    private LocalDateTime lastInteractionAt;
 
     /**
      * 优先级（用于多Agent调度）
