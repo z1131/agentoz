@@ -256,7 +256,7 @@ public class AgentManagerServiceImpl implements AgentManagerService {
         // 构建配置实体
         AgentConfigEntity configEntity = AgentConfigEntity.builder()
                 .configId(configId)
-                .configName(apiConfig.getConfigName())
+                .configName(apiConfig.getConfigName() != null ? apiConfig.getConfigName() : "默认配置-" + configId.substring(4, 12))
                 .description(apiConfig.getDescription())
                 .tags(apiConfig.getTags())
                 // 基础环境

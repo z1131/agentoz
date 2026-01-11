@@ -32,3 +32,9 @@ mcp:
     server-version: 1.0.0
     http-endpoint: /mcp/agent/message
     sse-endpoint: /mcp/agent/sse
+
+# Codex-Agent 配置
+codex:
+  agent:
+    host: ${CODEX_AGENT_HOST:localhost}
+    port: ${CODEX_AGENT_PORT:50051}
