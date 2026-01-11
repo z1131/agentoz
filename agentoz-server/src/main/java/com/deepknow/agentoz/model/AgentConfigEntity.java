@@ -2,7 +2,6 @@ package com.deepknow.agentoz.model;
 
 import com.baomidou.mybatisplus.annotation.*;
 import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
-import com.deepknow.agentoz.dto.config.McpServerConfigVO;
 import com.deepknow.agentoz.dto.config.ModelOverridesVO;
 import com.deepknow.agentoz.dto.config.ProviderConfigVO;
 import com.deepknow.agentoz.dto.config.SessionSourceVO;
@@ -12,7 +11,6 @@ import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
 /**
  * Agent配置实体 - 完整对齐Codex-Agent的SessionConfig
@@ -178,18 +176,8 @@ public class AgentConfigEntity {
     private ModelOverridesVO modelOverrides;
 
     /**
-     * MCP服务器配置映射
-     * 对应Proto: map<string, McpServerConfig> mcp_servers
-     * key: 服务器名称 (如 "git", "filesystem")
-     * value: MCP服务器配置
-     */
-    @TableField(typeHandler = JacksonTypeHandler.class)
-    private Map<String, McpServerConfigVO> mcpServers;
-
-    /**
      * MCP服务器配置 (JSON 字符串格式)
      * <p>直接透传业务侧配置的原始 JSON。</p>
-     * 优先级高于 mcpServers 字段。
      */
     private String mcpConfigJson;
 
