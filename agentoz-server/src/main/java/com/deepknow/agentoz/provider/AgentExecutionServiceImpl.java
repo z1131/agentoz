@@ -70,7 +70,7 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             String conversationId = request.getConversationId();
             String userMessage = request.getMessage();
 
-            log.info(">>> 收到任务请求: {}", traceInfo);
+            log.info("收到任务请求: {}", traceInfo);
 
             if (agentId == null || agentId.isEmpty()) {
                 if (conversationId == null || conversationId.isEmpty()) {
@@ -106,13 +106,13 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 throw new AgentOzException(AgentOzErrorCode.CONFIG_NOT_FOUND, agent.getConfigId());
             }
 
-            // ✅ 步骤 1: 记录用户消息到会话历史（所有 Agent 共享）
+            // 步骤 1: 记录用户消息到会话历史（所有 Agent 共享）
             conversationHistoryManager.appendUserMessage(conversationId, userMessage);
 
-            // ✅ 步骤 2: 广播用户消息到会话中的所有 Agent
+            // 步骤 2: 广播用户消息到会话中的所有 Agent
             broadcastUserMessageToAllAgents(conversationId, userMessage);
 
-            // ✅ 步骤 3: 记录主智能体被调用状态（已在步骤2的broadcast中记录）
+            // 步骤 3: 记录主智能体被调用状态（已在步骤2的broadcast中记录）
 
             // 动态注入系统级 MCP
             try {
@@ -128,7 +128,7 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             log.info("准备调用Codex: agentId={}, model={}, historySize={}",
                     finalAgentId, config.getLlmModel(), historyItems.size());
 
-            // ✅ 步骤 4: 调用 Codex-Agent，并在响应返回时记录历史
+            // 步骤 4: 调用 Codex-Agent，并在响应返回时记录历史
             codexAgentClient.runTask(
                     agent.getConversationId(),
                     config,
@@ -138,11 +138,11 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                         // 每次收到响应时
                         TaskResponse dto = TaskResponseProtoConverter.toTaskResponse(proto);
 
-                        // ✅ 记录 Assistant 响应到会话历史
+                        // 记录 Assistant 响应到会话历史
                         if (dto.getFinalResponse() != null && !dto.getFinalResponse().isEmpty()) {
                             conversationHistoryManager.appendAssistantMessage(conversationId, dto.getFinalResponse());
 
-                            // ✅ 记录主智能体返回状态
+                            // 记录主智能体返回状态
                             agentContextManager.onAgentResponse(finalAgentId, dto.getFinalResponse());
                         }
 
@@ -211,10 +211,10 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 agentContextManager.onAgentCalled(agent.getAgentId(), userMessage);
             }
 
-            log.info("✅ 用户消息已广播到所有 Agent");
+            log.info("用户消息已广播到所有 Agent");
 
         } catch (Exception e) {
-            log.error("❌ 广播用户消息到所有 Agent 失败: conversationId={}", conversationId, e);
+            log.error("广播用户消息到所有 Agent 失败: conversationId={}", conversationId, e);
         }
     }
 
@@ -262,9 +262,9 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 throw new AgentOzException(AgentOzErrorCode.CONFIG_NOT_FOUND, agent.getConfigId());
             }
 
-            // ⚠️ 注意：不追加到会话历史（因为是 Agent 间调用）
+            // 注意：不追加到会话历史（因为是 Agent 间调用）
 
-            // ✅ 步骤 1: 仅记录目标 Agent 被调用状态
+            // 步骤 1: 仅记录目标 Agent 被调用状态
             agentContextManager.onAgentCalled(agentId, message);
 
             // 动态注入系统级 MCP
@@ -281,7 +281,7 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             log.info("准备调用Codex (单Agent模式): agentId={}, model={}, historySize={}",
                     agentId, config.getLlmModel(), historyItems.size());
 
-            // ✅ 步骤 2: 调用 Codex-Agent，并在响应返回时记录历史
+            // 步骤 2: 调用 Codex-Agent，并在响应返回时记录历史
             codexAgentClient.runTask(
                     agent.getConversationId(),
                     config,
@@ -291,9 +291,9 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                         // 每次收到响应时
                         TaskResponse dto = TaskResponseProtoConverter.toTaskResponse(proto);
 
-                        // ⚠️ 注意：不追加到会话历史（因为是 Agent 间调用）
+                        // 注意：不追加到会话历史（因为是 Agent 间调用）
 
-                        // ✅ 仅记录目标 Agent 返回状态
+                        // 仅记录目标 Agent 返回状态
                         if (dto.getFinalResponse() != null && !dto.getFinalResponse().isEmpty()) {
                             agentContextManager.onAgentResponse(agentId, dto.getFinalResponse());
                         }
