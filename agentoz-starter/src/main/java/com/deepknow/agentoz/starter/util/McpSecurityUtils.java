@@ -35,10 +35,22 @@ public class McpSecurityUtils {
                 return authHeader.substring(7);
             }
             
-            // 2. 降级尝试 Query Param (规避部分客户端 Header 丢失问题)
+            // 2. 降级尝试 Query Param
             String tokenParam = request.getParameter("token");
             if (tokenParam != null && !tokenParam.isBlank()) {
                 return tokenParam;
+            }
+
+            // 3. 终极尝试: 手动解析 Query String (防止 ParameterMap 未解析)
+            String queryString = request.getQueryString();
+            if (queryString != null) {
+                // 简单查找 token=...
+                int index = queryString.indexOf("token=");
+                if (index != -1) {
+                    String sub = queryString.substring(index + 6);
+                    int end = sub.indexOf("&");
+                    return end == -1 ? sub : sub.substring(0, end);
+                }
             }
         } catch (Throwable ignored) {
             // 可能不在 Web 环境下，或者没有引入 Servlet API
