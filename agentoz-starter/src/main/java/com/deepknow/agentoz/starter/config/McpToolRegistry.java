@@ -3,6 +3,7 @@ package com.deepknow.agentoz.starter.config;
 import com.deepknow.agentoz.starter.annotation.AgentParam;
 import com.deepknow.agentoz.starter.annotation.AgentTool;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
@@ -59,10 +60,6 @@ public class McpToolRegistry implements ApplicationContextAware {
             }
 
             // 2. 扫描方法
-            // 注意：如果是 CGLIB 代理，beanType 是子类，方法上的注解依然可见。
-            // 如果是 JDK 代理，beanType 是 Proxy 类，可能看不到接口上的注解。
-            // 但 Spring 的 getType 通常返回的是 Bean 的实际类型（如果未初始化可能返回预测类型）。
-            // 无论如何，我们尝试扫描。
             ReflectionUtils.doWithMethods(beanType, method -> {
                 if (method.isAnnotationPresent(AgentTool.class)) {
                     try {
@@ -113,7 +110,7 @@ public class McpToolRegistry implements ApplicationContextAware {
                 
                 // 参数映射
                 Map<String, Object> argsMap = request.arguments();
-                Object[] args = resolveArguments(method, argsMap);
+                Object[] args = resolveArguments(method, argsMap, ctx);
                 
                 // 执行调用
                 Object result = method.invoke(beanInstance, args);
@@ -157,6 +154,11 @@ public class McpToolRegistry implements ApplicationContextAware {
         for (int i = 0; i < parameters.length; i++) {
             Parameter param = parameters[i];
             
+            // 跳过 Context 参数
+            if (McpTransportContext.class.isAssignableFrom(param.getType())) {
+                continue;
+            }
+
             AgentParam paramAnnotation = param.getAnnotation(AgentParam.class);
             
             // 获取参数名：注解 > 反射 > argN
@@ -204,7 +206,7 @@ public class McpToolRegistry implements ApplicationContextAware {
     /**
      * 将 Map arguments 映射为 Java 方法参数
      */
-    private Object[] resolveArguments(Method method, Map<String, Object> arguments) {
+    private Object[] resolveArguments(Method method, Map<String, Object> arguments, McpTransportContext ctx) {
         Parameter[] parameters = method.getParameters();
         String[] paramNames = parameterNameDiscoverer.getParameterNames(method);
         Object[] args = new Object[parameters.length];
@@ -212,6 +214,12 @@ public class McpToolRegistry implements ApplicationContextAware {
         for (int i = 0; i < parameters.length; i++) {
             Parameter param = parameters[i];
             
+            // 注入 Context
+            if (McpTransportContext.class.isAssignableFrom(param.getType())) {
+                args[i] = ctx;
+                continue;
+            }
+
             AgentParam paramAnnotation = param.getAnnotation(AgentParam.class);
             
             String paramName = (paramAnnotation != null && StringUtils.hasText(paramAnnotation.name()))

@@ -21,11 +21,6 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Call Agent Tool - 实现 Agent 间相互调用
- *
- * <p>允许一个 Agent 通过 MCP 协议调用另一个 Agent，实现多智能体协作。</p>
- *
- * @author AgentOZ Team
- * @since 1.0.0
  */
 @Slf4j
 @Component
@@ -42,18 +37,38 @@ public class CallAgentTool {
 
     @AgentTool(name = "call_agent", description = "调用另一个Agent执行任务，实现Agent间协作。可以指定目标Agent名称和具体任务。")
     public String callAgent(
+            io.modelcontextprotocol.common.McpTransportContext ctx,
             @AgentParam(name = "targetAgentName", value = "目标Agent的名称（如 PaperSearcher）", required = true) String targetAgentName,
             @AgentParam(name = "task", value = "要执行的任务描述", required = true) String task,
             @AgentParam(name = "context", value = "附加的上下文信息（可选）", required = false) String context
     ) {
         try {
-            // 1. 身份与会话识别 (从 Token 解析)
-            String sourceAgentId = "unknown";
-            String sourceAgentName = "Assistant"; // 默认名称
-            String conversationId = null;
-            
+            // 1. 身份识别 (优先使用通用的 SecurityUtils)
             String token = McpSecurityUtils.getCurrentToken();
-            log.info("CallAgentTool: 接收到的 Token: {}", token != null ? "Present (len=" + token.length() + ")" : "NULL");
+            
+            // 2. 如果 Utils 没拿到 (可能是线程上下文丢失)，尝试从 McpTransportContext 反射拿
+            if (token == null && ctx != null) {
+                try {
+                    // 使用反射调用 getHeaders() 以避开编译时找不到符号的问题
+                    java.lang.reflect.Method getHeadersMethod = ctx.getClass().getMethod("getHeaders");
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, Object> headers = (java.util.Map<String, Object>) getHeadersMethod.invoke(ctx);
+                    
+                    if (headers != null) {
+                        String authHeader = (String) headers.get("Authorization");
+                        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                            token = authHeader.substring(7);
+                            log.info("[CallAgentTool] 成功从 McpTransportContext (反射) 提取 Token");
+                        }
+                    }
+                } catch (Throwable e) {
+                    log.debug("[CallAgentTool] 从 McpTransportContext 获取 Header 失败: {}", e.getMessage());
+                }
+            }
+
+            String sourceAgentId = "unknown";
+            String sourceAgentName = "Assistant";
+            String conversationId = null;
 
             if (token != null) {
                 try {
@@ -63,7 +78,7 @@ public class CallAgentTool {
                         conversationId = claims.get("cid", String.class);
                         log.info("CallAgentTool: Token 解析成功. Subject={}, CID={}", sourceAgentId, conversationId);
                         
-                        // 根据 ID 查找发送者名称
+                        // 查找发送者名称
                         AgentEntity sourceAgent = agentRepository.selectOne(
                                 new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, sourceAgentId)
                         );
@@ -83,7 +98,7 @@ public class CallAgentTool {
             log.info(">>> MCP CallAgent 调用: Source[{}({})] -> TargetName[{}], ConvId={}",
                     sourceAgentName, sourceAgentId, targetAgentName, conversationId);
 
-            // 2. 解析目标 Agent ID (Name -> ID)
+            // 3. 解析目标 Agent ID (Name -> ID)
             AgentEntity targetAgent = agentRepository.selectOne(
                     new LambdaQueryWrapper<AgentEntity>()
                             .eq(AgentEntity::getConversationId, conversationId)
@@ -96,56 +111,48 @@ public class CallAgentTool {
 
             String targetAgentId = targetAgent.getAgentId();
 
-            // 3. 构建消息 (合并 context)
+            // 4. 构建消息 (合并 context)
             String finalMessage = task;
             if (context != null && !context.isBlank()) {
                 finalMessage = String.format("%s\n\n[Context]\n%s", task, context);
             }
 
-            // 4. 构建执行请求
+            // 5. 构建执行请求
             ExecuteTaskRequest executeRequest = new ExecuteTaskRequest();
             executeRequest.setAgentId(targetAgentId);
             executeRequest.setConversationId(conversationId);
             executeRequest.setMessage(finalMessage);
             executeRequest.setRole("assistant"); 
-            executeRequest.setSenderName(sourceAgentName); // 关键：传入发送者名字用于业务显示
+            executeRequest.setSenderName(sourceAgentName);
 
-            // 5. 同步调用 Agent 服务（等待结果）
+            // 6. 同步调用 Agent 服务
             CompletableFuture<String> resultFuture = new CompletableFuture<>();
-
-            // 创建响应观察者
             StreamObserver<TaskResponse> responseObserver = new StreamObserver<TaskResponse>() {
                 private final StringBuilder fullResponse = new StringBuilder();
-
                 @Override
                 public void onNext(TaskResponse response) {
                     if (response != null && response.getFinalResponse() != null) {
                         fullResponse.append(response.getFinalResponse());
                     }
                 }
-
                 @Override
                 public void onError(Throwable throwable) {
                     log.error("Agent 调用失败", throwable);
                     resultFuture.completeExceptionally(throwable);
                 }
-
                 @Override
                 public void onCompleted() {
-                    String result = fullResponse.toString();
-                    resultFuture.complete(result);
+                    resultFuture.complete(fullResponse.toString());
                 }
             };
 
-            // 6. 发起调用
             agentExecutionService.executeTask(executeRequest, responseObserver);
 
-            // 7. 等待结果并返回（最多等待 5 分钟）
+            // 7. 等待结果 (最多5分钟)
             return resultFuture.get(5, TimeUnit.MINUTES);
 
         } catch (Exception e) {
             log.error("CallAgent 工具执行异常", e);
-            // 返回友好的错误信息给 LLM
             return "Error: 工具执行失败 - " + e.getMessage();
         }
     }
