@@ -198,8 +198,101 @@ public class AgentEntity {
     private LocalDateTime updatedAt;
     private LocalDateTime lastUsedAt;
 
-    /**
-     * 创建者用户ID
-     */
-    private String createdBy;
-}
+        /**
+
+         * 创建者用户ID
+
+         */
+
+        private String createdBy;
+
+    
+
+        // ============================================================
+
+        // 充血模型方法 (Rich Domain Methods)
+
+        // ============================================================
+
+    
+
+        /**
+         * 追加上下文项
+         *
+         * @param itemDto 要追加的对象 (DTO/POJO)
+         * @param mapper Jackson ObjectMapper
+         */
+        public void appendContext(Object itemDto, com.fasterxml.jackson.databind.ObjectMapper mapper) {
+            try {
+                com.fasterxml.jackson.databind.node.ArrayNode root;
+                if (this.activeContext == null || this.activeContext.isEmpty() || "null".equals(this.activeContext)) {
+                    root = mapper.createArrayNode();
+                } else {
+                    com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(this.activeContext);
+                    root = node.isArray() ? (com.fasterxml.jackson.databind.node.ArrayNode) node : mapper.createArrayNode();
+                }
+                root.addPOJO(itemDto);
+                this.activeContext = mapper.writeValueAsString(root);
+            } catch (Exception e) {
+                // 简单吞掉或打印，实体内部不宜抛出复杂异常，或者抛出 RuntimeException
+                throw new RuntimeException("Failed to append context", e);
+            }
+        }
+
+            /**
+             * 更新输入状态
+             *
+             * @param inputMessage 输入消息
+             * @param role 来源角色 (user 或 AgentName)
+             */
+
+            public void updateInputState(String inputMessage, String role) {
+
+                String summary = generateSummary(inputMessage);
+                String prefix;
+
+                if (role == null || "user".equalsIgnoreCase(role)) {
+                    prefix = "输入: ";
+                } else {
+                    prefix = "[From " + role + "]: ";
+                }
+                if (this.stateDescription == null || this.stateDescription.isEmpty()) {
+                    this.stateDescription = prefix + summary;
+                } else {
+                    this.stateDescription = this.stateDescription + " | " + prefix + summary;
+                }
+                this.interactionCount = (this.interactionCount != null ? this.interactionCount : 0) + 1;
+                this.lastInteractionType = "input";
+                this.lastInteractionAt = LocalDateTime.now();
+                if (this.contextFormat == null) {
+                    this.contextFormat = "history_items_v1";
+                }
+            }
+        /**
+         * 更新输出状态
+         *
+         * @param responseMessage 输出消息
+         */
+        public void updateOutputState(String responseMessage) {
+
+            String summary = generateSummary(responseMessage);
+            String prefix = "输出: ";
+            if (this.stateDescription == null || this.stateDescription.isEmpty()) {
+                this.stateDescription = prefix + summary;
+            } else {
+                this.stateDescription = this.stateDescription + " | " + prefix + summary;
+            }
+            this.interactionCount = (this.interactionCount != null ? this.interactionCount : 0) + 1;
+            this.lastInteractionType = "output";
+            this.lastInteractionAt = LocalDateTime.now();
+        }
+
+        private String generateSummary(String text) {
+            if (text == null) return "";
+            String summary = text.length() > 50 ? text.substring(0, 50) + "..." : text;
+            return summary.replace("\n", " ");
+        }
+
+    }
+
+    

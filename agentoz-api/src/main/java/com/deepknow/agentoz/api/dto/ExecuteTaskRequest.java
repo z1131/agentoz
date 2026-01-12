@@ -29,9 +29,23 @@ public class ExecuteTaskRequest implements Serializable {
      */
     private Map<String, Object> overrides;
 
+    /**
+     * 消息发送者角色 (user / assistant)
+     */
+    private String role;
+
+    /**
+     * 发送者名称 (用于业务显示)
+     */
+    private String senderName;
+
     public ExecuteTaskRequest() {}
 
-    // ... (保持其他字段不变)
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
+
+    public String getSenderName() { return senderName; }
+    public void setSenderName(String senderName) { this.senderName = senderName; }
 
     public String getAgentId() { return agentId; }
     public void setAgentId(String agentId) { this.agentId = agentId; }

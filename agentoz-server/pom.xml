@@ -25,6 +25,12 @@
         </dependency>
 
         <dependency>
+            <groupId>com.deepknow</groupId>
+            <artifactId>agentoz-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
@@ -156,18 +162,6 @@
             <artifactId>jjwt-jackson</artifactId>
             <version>0.11.5</version>
             <scope>runtime</scope>
-        </dependency>
-
-        <!-- MCP SDK - 核心模块 (包含 STDIO, SSE, Streamable-HTTP 传输) -->
-        <dependency>
-            <groupId>io.modelcontextprotocol.sdk</groupId>
-            <artifactId>mcp</artifactId>
-        </dependency>
-
-        <!-- MCP SDK - Spring WebMVC 集成 (你的项目使用 WebMVC) -->
-        <dependency>
-            <groupId>io.modelcontextprotocol.sdk</groupId>
-            <artifactId>mcp-spring-webmvc</artifactId>
         </dependency>
     </dependencies>
 

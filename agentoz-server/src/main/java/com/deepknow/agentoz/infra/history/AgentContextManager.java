@@ -1,18 +1,20 @@
 package com.deepknow.agentoz.infra.history;
 
+import codex.agent.ContentItem;
 import codex.agent.HistoryItem;
 import codex.agent.MessageItem;
-import codex.agent.ContentItem;
-import com.deepknow.agentoz.model.AgentEntity;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.deepknow.agentoz.dto.MessageDTO;
+import com.deepknow.agentoz.infra.converter.grpc.HistoryProtoConverter;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
+import com.deepknow.agentoz.model.AgentEntity;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Agent 上下文管理器
@@ -39,25 +41,17 @@ public class AgentContextManager {
     /**
      * Agent 被调用时更新状态
      *
-     * <p>执行以下操作：</p>
-     * <ol>
-     *   <li>追加输入消息到 activeContext</li>
-     *   <li>更新 stateDescription（输入摘要）</li>
-     *   <li>更新交互统计</li>
-     *   <li>立即写库</li>
-     * </ol>
-     *
      * @param agentId Agent ID
      * @param inputMessage 输入消息内容
+     * @param role 消息角色 (user 或 assistant)
      */
-    public void onAgentCalled(String agentId, String inputMessage) {
-        log.info(">>> Agent被调用: agentId={}, inputLength={}",
-                agentId, inputMessage != null ? inputMessage.length() : 0);
+    public void onAgentCalled(String agentId, String inputMessage, String role) {
+        log.info("Agent被调用: agentId={}, role={}, inputLength={}",
+                agentId, role, inputMessage != null ? inputMessage.length() : 0);
 
         try {
-            // 1. 查询 Agent
             AgentEntity agent = agentRepository.selectOne(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentEntity>()
+                    new LambdaQueryWrapper<AgentEntity>()
                             .eq(AgentEntity::getAgentId, agentId)
             );
 
@@ -66,9 +60,10 @@ public class AgentContextManager {
                 return;
             }
 
-            // 2. 追加输入消息到 activeContext
+            // 1. 构建 Proto (保持内容纯净，不加前缀)
+            // LLM 协议强校验 role 必须为 user (对于输入消息)
             MessageItem messageItem = MessageItem.newBuilder()
-                    .setRole("user")
+                    .setRole("user") 
                     .addContent(ContentItem.newBuilder().setText(inputMessage).build())
                     .build();
 
@@ -76,69 +71,42 @@ public class AgentContextManager {
                     .setMessage(messageItem)
                     .build();
 
-            appendToAgentContext(agent, historyItem);
+            // 2. 转换为 DTO 并存储
+            MessageDTO dto = HistoryProtoConverter.toMessageDTO(historyItem);
+            agent.appendContext(dto, objectMapper);
 
-            // 3. 更新 stateDescription（输入摘要）
-            String inputSummary = generateInputSummary(inputMessage);
-            if (agent.getStateDescription() == null || agent.getStateDescription().isEmpty()) {
-                agent.setStateDescription("输入: " + inputSummary);
-            } else {
-                // 如果已有描述，追加新的输入
-                agent.setStateDescription(agent.getStateDescription() + " | 新输入: " + inputSummary);
-            }
+            // 3. 更新状态描述 (传入 Role/SenderName 以生成 [From XXX] 的摘要)
+            agent.updateInputState(inputMessage, role);
 
-            // 4. 更新交互统计
-            agent.setInteractionCount((agent.getInteractionCount() != null ? agent.getInteractionCount() : 0) + 1);
-            agent.setLastInteractionType("input");
-            agent.setLastInteractionAt(LocalDateTime.now());
-
-            // 5. 设置上下文格式版本（首次）
-            if (agent.getContextFormat() == null) {
-                agent.setContextFormat("history_items_v1");
-            }
-
-            // 6. 立即写库
+            // 4. 写库
             agentRepository.updateById(agent);
 
-            log.info("✅ Agent被调用状态已更新: agentId={}, stateDescription={}",
+            log.info("Agent被调用状态已更新: agentId={}, stateDescription={}",
                     agentId, agent.getStateDescription());
 
         } catch (Exception e) {
-            log.error("❌ 更新Agent被调用状态失败: agentId={}", agentId, e);
+            log.error("更新Agent被调用状态失败: agentId={}", agentId, e);
         }
     }
 
     /**
      * Agent 返回响应时更新状态
-     *
-     * <p>执行以下操作：</p>
-     * <ol>
-     *   <li>追加响应消息到 activeContext</li>
-     *   <li>更新 stateDescription（追加结果摘要）</li>
-     *   <li>更新交互统计</li>
-     *   <li>立即写库</li>
-     * </ol>
-     *
-     * @param agentId Agent ID
-     * @param responseMessage 响应消息内容
      */
     public void onAgentResponse(String agentId, String responseMessage) {
         log.info(">>> Agent返回响应: agentId={}, responseLength={}",
                 agentId, responseMessage != null ? responseMessage.length() : 0);
 
         try {
-            // 1. 查询 Agent
             AgentEntity agent = agentRepository.selectOne(
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentEntity>()
                             .eq(AgentEntity::getAgentId, agentId)
             );
 
             if (agent == null) {
-                log.warn("Agent不存在，无法更新状态: agentId={}", agentId);
                 return;
             }
 
-            // 2. 追加响应消息到 activeContext
+            // 1. 构建 Proto
             MessageItem messageItem = MessageItem.newBuilder()
                     .setRole("assistant")
                     .addContent(ContentItem.newBuilder().setText(responseMessage).build())
@@ -148,28 +116,17 @@ public class AgentContextManager {
                     .setMessage(messageItem)
                     .build();
 
-            appendToAgentContext(agent, historyItem);
+            // 2. 转换为 DTO 并存储
+            MessageDTO dto = HistoryProtoConverter.toMessageDTO(historyItem);
+            agent.appendContext(dto, objectMapper);
 
-            // 3. 更新 stateDescription（追加结果摘要）
-            String resultSummary = generateResultSummary(responseMessage);
-            String currentDesc = agent.getStateDescription();
-            if (currentDesc == null || currentDesc.isEmpty()) {
-                agent.setStateDescription("输出: " + resultSummary);
-            } else {
-                // 追加结果到现有描述
-                agent.setStateDescription(currentDesc + " | 输出: " + resultSummary);
-            }
+            // 3. 更新状态
+            agent.updateOutputState(responseMessage);
 
-            // 4. 更新交互统计
-            agent.setInteractionCount((agent.getInteractionCount() != null ? agent.getInteractionCount() : 0) + 1);
-            agent.setLastInteractionType("output");
-            agent.setLastInteractionAt(LocalDateTime.now());
-
-            // 5. 立即写库
+            // 4. 写库
             agentRepository.updateById(agent);
 
-            log.info("✅ Agent返回响应状态已更新: agentId={}, stateDescription={}",
-                    agentId, agent.getStateDescription());
+            log.info("✅ Agent返回响应状态已更新: agentId={}", agentId);
 
         } catch (Exception e) {
             log.error("❌ 更新Agent返回响应状态失败: agentId={}", agentId, e);
@@ -178,11 +135,6 @@ public class AgentContextManager {
 
     /**
      * Agent 调用工具时更新状态
-     *
-     * @param agentId Agent ID
-     * @param callId 调用ID
-     * @param toolName 工具名称
-     * @param arguments 工具参数（JSON字符串）
      */
     public void onAgentCalledTool(String agentId, String callId, String toolName, String arguments) {
         log.info(">>> Agent调用工具: agentId={}, callId={}, tool={}", agentId, callId, toolName);
@@ -197,25 +149,22 @@ public class AgentContextManager {
                 return;
             }
 
-            // 追加函数调用记录到 activeContext
-            codex.agent.FunctionCallItem functionCallItem = codex.agent.FunctionCallItem.newBuilder()
-                    .setCallId(callId)
-                    .setName(toolName)
-                    .setArguments(arguments)
-                    .build();
+            // 构建简单的 Map 存储工具调用记录 (暂不使用 Proto 转换)
+            Map<String, Object> toolCall = new HashMap<>();
+            toolCall.put("type", "function_call");
+            toolCall.put("call_id", callId);
+            toolCall.put("name", toolName);
+            toolCall.put("arguments", arguments);
 
-            HistoryItem historyItem = HistoryItem.newBuilder()
-                    .setFunctionCall(functionCallItem)
-                    .build();
-
-            appendToAgentContext(agent, historyItem);
-
-            // 更新 stateDescription（追加工具调用信息）
+            agent.appendContext(toolCall, objectMapper);
+            
+            // 更新状态描述 (简单追加)
             String currentDesc = agent.getStateDescription();
+            String summary = "调用工具: " + toolName;
             if (currentDesc == null || currentDesc.isEmpty()) {
-                agent.setStateDescription("调用工具: " + toolName);
+                agent.setStateDescription(summary);
             } else {
-                agent.setStateDescription(currentDesc + " | 调用工具: " + toolName);
+                agent.setStateDescription(currentDesc + " | " + summary);
             }
 
             agentRepository.updateById(agent);
@@ -227,10 +176,6 @@ public class AgentContextManager {
 
     /**
      * 工具返回结果时更新状态
-     *
-     * @param agentId Agent ID
-     * @param callId 调用ID
-     * @param output 工具返回结果（JSON字符串）
      */
     public void onToolReturned(String agentId, String callId, String output) {
         log.info(">>> 工具返回结果: agentId={}, callId={}", agentId, callId);
@@ -245,88 +190,17 @@ public class AgentContextManager {
                 return;
             }
 
-            // 追加函数返回结果到 activeContext
-            codex.agent.FunctionCallOutputItem functionCallOutputItem = codex.agent.FunctionCallOutputItem.newBuilder()
-                    .setCallId(callId)
-                    .setOutput(output)
-                    .build();
+            // 构建 Map 存储结果
+            Map<String, Object> toolOutput = new HashMap<>();
+            toolOutput.put("type", "function_call_output");
+            toolOutput.put("call_id", callId);
+            toolOutput.put("output", output);
 
-            HistoryItem historyItem = HistoryItem.newBuilder()
-                    .setFunctionCallOutput(functionCallOutputItem)
-                    .build();
-
-            appendToAgentContext(agent, historyItem);
-
+            agent.appendContext(toolOutput, objectMapper);
             agentRepository.updateById(agent);
 
         } catch (Exception e) {
             log.error("❌ 更新工具返回状态失败: agentId={}", agentId, e);
         }
-    }
-
-    /**
-     * 追加 HistoryItem 到 Agent 的 activeContext
-     */
-    private void appendToAgentContext(AgentEntity agent, HistoryItem newItem) {
-        List<HistoryItem> contextList = parseAgentContext(agent.getActiveContext());
-        contextList.add(newItem);
-        agent.setActiveContext(serializeContextList(contextList));
-    }
-
-    /**
-     * 解析 Agent 上下文 JSON 字符串为 HistoryItem 列表
-     */
-    private List<HistoryItem> parseAgentContext(String contextJson) {
-        if (contextJson == null || contextJson.isEmpty() || "null".equals(contextJson)) {
-            return new ArrayList<>();
-        }
-        try {
-            // TODO: 实现 JSON 到 HistoryItem 的解析
-            return new ArrayList<>();
-        } catch (Exception e) {
-            log.warn("解析Agent上下文失败: {}", e.getMessage());
-            return new ArrayList<>();
-        }
-    }
-
-    /**
-     * 将 HistoryItem 列表序列化为 JSON 字符串
-     */
-    private String serializeContextList(List<HistoryItem> contextList) {
-        try {
-            // TODO: 实现 HistoryItem 到 JSON 的序列化
-            return "[]";
-        } catch (Exception e) {
-            log.error("序列化Agent上下文失败", e);
-            return "[]";
-        }
-    }
-
-    /**
-     * 生成输入摘要（用于 stateDescription）
-     */
-    private String generateInputSummary(String inputMessage) {
-        if (inputMessage == null) {
-            return "";
-        }
-        // 简单截断到 50 个字符
-        String summary = inputMessage.length() > 50
-                ? inputMessage.substring(0, 50) + "..."
-                : inputMessage;
-        return summary.replace("\n", " "); // 替换换行符
-    }
-
-    /**
-     * 生成结果摘要（用于 stateDescription）
-     */
-    private String generateResultSummary(String responseMessage) {
-        if (responseMessage == null) {
-            return "";
-        }
-        // 简单截断到 50 个字符
-        String summary = responseMessage.length() > 50
-                ? responseMessage.substring(0, 50) + "..."
-                : responseMessage;
-        return summary.replace("\n", " "); // 替换换行符
     }
 }

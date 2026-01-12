@@ -13,10 +13,10 @@
     <artifactId>agentoz-starter</artifactId>
     <packaging>jar</packaging>
     <name>AgentOZ Starter</name>
-    <description>AgentOZ 业务集成 SDK</description>
+    <description>AgentOZ 业务集成 SDK - 提供 MCP 服务化能力与 RPC 客户端</description>
 
     <dependencies>
-        <!-- 引入 API 定义 -->
+        <!-- 核心 API 定义 (DTO, Interface) -->
         <dependency>
             <groupId>com.deepknow</groupId>
             <artifactId>agentoz-api</artifactId>
@@ -28,20 +28,45 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
         </dependency>
+        
+        <!-- Web 支持 (MCP Server 需要暴露 HTTP 端点) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <optional>true</optional> 
+            <!-- 标记为 optional，如果宿主应用不是 Web 应用，可以不启用 Web 功能 -->
+        </dependency>
 
-        <!-- Dubbo (用于 RPC 调用) -->
+        <!-- Dubbo (用于 RPC 调用) - 可选，如果只是作为 MCP Server 可能不需要 -->
         <dependency>
             <groupId>org.apache.dubbo</groupId>
             <artifactId>dubbo-spring-boot-starter</artifactId>
             <version>${dubbo.version}</version>
+            <optional>true</optional>
         </dependency>
 
+        <!-- MCP SDK - 核心模块 -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp</artifactId>
+        </dependency>
+
+        <!-- MCP SDK - Spring WebMVC 集成 -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp-spring-webmvc</artifactId>
+        </dependency>
+
+        <!-- 工具类 -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
-        
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>

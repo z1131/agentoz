@@ -25,13 +25,12 @@ logging:
   include-application-name: false
 
 # MCP Server 配置
-mcp:
-  server:
+agentoz:
+  mcp:
     enabled: true
     server-name: agentoz
     server-version: 1.0.0
-    http-endpoint: /mcp/agent/message
-    sse-endpoint: /mcp/agent/sse
+    http-endpoint: /mcp
 
 # Codex-Agent 配置
 codex:

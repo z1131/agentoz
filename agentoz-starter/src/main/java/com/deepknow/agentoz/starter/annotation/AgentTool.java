@@ -1,4 +1,4 @@
-package com.deepknow.agentoz.api.annotation;
+package com.deepknow.agentoz.starter.annotation;
 
 import java.lang.annotation.*;
 
@@ -13,12 +13,12 @@ import java.lang.annotation.*;
 public @interface AgentTool {
 
     /**
-     * 工具名称，默认使用方法名
+     * 工具名称，默认为方法名
      */
     String name() default "";
 
     /**
-     * 工具描述，用于告诉 LLM 这个工具是干什么的
+     * 工具描述 (Prompt)，用于告诉 LLM 如何使用此工具
      */
     String description() default "";
 }

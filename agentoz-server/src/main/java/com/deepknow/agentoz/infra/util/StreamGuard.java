@@ -59,7 +59,7 @@ public class StreamGuard {
     /**
      * 创建一个带异常防护的透传 Observer
      */
-    public static <T> org.apache.dubbo.common.stream.StreamObserver<T> wrapObserver(
+    public static <T> StreamObserver<T> wrapObserver(
             StreamObserver<TaskResponse> downstream,
             Consumer<T> onNextLogic,
             String traceInfo
