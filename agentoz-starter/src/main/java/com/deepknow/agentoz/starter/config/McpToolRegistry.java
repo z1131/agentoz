@@ -52,37 +52,29 @@ public class McpToolRegistry implements ApplicationContextAware {
         String[] beanNames = applicationContext.getBeanDefinitionNames();
 
         for (String beanName : beanNames) {
-            // 1. 跳过自身和基础设施 Bean，防止循环依赖
-            if ("mcpStatelessSyncServer".equals(beanName) || 
-                "mcpToolRegistry".equals(beanName) ||
-                "mcpServerAutoConfiguration".equals(beanName) ||
-                beanName.startsWith("org.springframework")) {
+            // 1. 获取 Bean 类型 (不触发实例化)
+            Class<?> beanType = applicationContext.getType(beanName);
+            if (beanType == null) {
                 continue;
             }
 
-            try {
-                // 2. 安全获取 Bean (如果 Bean 正在创建中导致循环依赖，这里会抛异常)
-                Object bean = applicationContext.getBean(beanName);
-                
-                // 处理 AOP 代理，获取原始类
-                Class<?> beanClass = AopUtils.getTargetClass(bean);
-
-                ReflectionUtils.doWithMethods(beanClass, method -> {
-                    if (method.isAnnotationPresent(AgentTool.class)) {
-                        try {
-                            specs.add(buildToolSpec(bean, method));
-                            log.info("🔨 [MCP] 注册工具: {} -> {}.{}", 
-                                    getToolName(method), beanClass.getSimpleName(), method.getName());
-                        } catch (Exception e) {
-                            log.error("❌ [MCP] 注册工具失败: {}.{}", beanClass.getSimpleName(), method.getName(), e);
-                        }
+            // 2. 扫描方法
+            // 注意：如果是 CGLIB 代理，beanType 是子类，方法上的注解依然可见。
+            // 如果是 JDK 代理，beanType 是 Proxy 类，可能看不到接口上的注解。
+            // 但 Spring 的 getType 通常返回的是 Bean 的实际类型（如果未初始化可能返回预测类型）。
+            // 无论如何，我们尝试扫描。
+            ReflectionUtils.doWithMethods(beanType, method -> {
+                if (method.isAnnotationPresent(AgentTool.class)) {
+                    try {
+                        // 传入 beanName 而不是实例，实现延迟加载
+                        specs.add(buildToolSpec(beanName, method));
+                        log.info("🔨 [MCP] 注册工具: {} -> {}.{}", 
+                                getToolName(method), beanType.getSimpleName(), method.getName());
+                    } catch (Exception e) {
+                        log.error("❌ [MCP] 注册工具失败: {}.{}", beanType.getSimpleName(), method.getName(), e);
                     }
-                });
-            } catch (Exception e) {
-                // 忽略无法初始化的 Bean (通常是因为循环依赖或其他配置问题)
-                // 这保证了 MCP Server 的启动不会因为某个无关 Bean 的错误而崩溃
-                log.debug("⚠️ [MCP] 跳过 Bean 扫描 (可能是循环依赖): {} - {}", beanName, e.getMessage());
-            }
+                }
+            });
         }
         return specs;
     }
@@ -92,7 +84,7 @@ public class McpToolRegistry implements ApplicationContextAware {
         return StringUtils.hasText(annotation.name()) ? annotation.name() : method.getName();
     }
 
-    private SyncToolSpecification buildToolSpec(Object bean, Method method) {
+    private SyncToolSpecification buildToolSpec(String beanName, Method method) {
         AgentTool annotation = method.getAnnotation(AgentTool.class);
         String name = getToolName(method);
         String description = annotation.description();
@@ -113,14 +105,18 @@ public class McpToolRegistry implements ApplicationContextAware {
                 .build();
 
         // 2. 构建执行闭包 (Context, Request) -> Result
+        // 关键点：延迟获取 Bean 实例
         return new SyncToolSpecification(toolDefinition, (ctx, request) -> {
             try {
+                // 延迟实例化：此时 Server 已启动，Bean 肯定已经准备好了
+                Object beanInstance = applicationContext.getBean(beanName);
+                
                 // 参数映射
                 Map<String, Object> argsMap = request.arguments();
                 Object[] args = resolveArguments(method, argsMap);
                 
                 // 执行调用
-                Object result = method.invoke(bean, args);
+                Object result = method.invoke(beanInstance, args);
                 
                 // 处理结果
                 String resultStr = result != null ? parseResult(result) : "execution_success";
