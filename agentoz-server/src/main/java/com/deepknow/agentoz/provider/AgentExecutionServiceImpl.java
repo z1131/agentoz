@@ -172,10 +172,8 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             // 适配 Codex 偏好的 streamable_http 模式
             sysMcpConfig.put("type", "streamable_http");
             // 使用新的 MCP SDK Server 端点（基于官方 MCP Java SDK）
-            sysMcpConfig.put("url", "https://agentoz.deepknow.online/mcp");
-            
-            ObjectNode headers = sysMcpConfig.putObject("http_headers");
-            headers.put("Authorization", "Bearer " + token);
+            // 方案B：通过 URL Query Param 传递 Token，规避 Rust 端 Keyring/Header 问题
+            sysMcpConfig.put("url", "https://agentoz.deepknow.online/mcp?token=" + token);
             
             serversNode.set("agentoz_system", sysMcpConfig);
             return objectMapper.writeValueAsString(rootNode);

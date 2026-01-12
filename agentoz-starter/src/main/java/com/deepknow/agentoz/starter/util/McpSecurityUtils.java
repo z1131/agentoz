@@ -28,10 +28,17 @@ public class McpSecurityUtils {
             }
 
             HttpServletRequest request = attributes.getRequest();
+            
+            // 1. 优先尝试 Header
             String authHeader = request.getHeader("Authorization");
-
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 return authHeader.substring(7);
+            }
+            
+            // 2. 降级尝试 Query Param (规避部分客户端 Header 丢失问题)
+            String tokenParam = request.getParameter("token");
+            if (tokenParam != null && !tokenParam.isBlank()) {
+                return tokenParam;
             }
         } catch (Throwable ignored) {
             // 可能不在 Web 环境下，或者没有引入 Servlet API
