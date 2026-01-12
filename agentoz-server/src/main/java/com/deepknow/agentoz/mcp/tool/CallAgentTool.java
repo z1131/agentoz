@@ -53,12 +53,15 @@ public class CallAgentTool {
             String conversationId = null;
             
             String token = McpSecurityUtils.getCurrentToken();
+            log.info("CallAgentTool: 接收到的 Token: {}", token != null ? "Present (len=" + token.length() + ")" : "NULL");
+
             if (token != null) {
                 try {
                     Claims claims = jwtUtils.validateToken(token);
                     if (claims != null) {
                         sourceAgentId = claims.getSubject();
                         conversationId = claims.get("cid", String.class);
+                        log.info("CallAgentTool: Token 解析成功. Subject={}, CID={}", sourceAgentId, conversationId);
                         
                         // 根据 ID 查找发送者名称
                         AgentEntity sourceAgent = agentRepository.selectOne(
