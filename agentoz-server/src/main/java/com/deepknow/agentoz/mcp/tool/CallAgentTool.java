@@ -46,20 +46,30 @@ public class CallAgentTool {
             // 1. 身份识别 (优先使用通用的 SecurityUtils)
             String token = McpSecurityUtils.getCurrentToken();
             
-            // 2. 如果 Utils 没拿到 (可能是线程上下文丢失)，尝试从 McpTransportContext 反射拿
+            // 2. 如果 Utils 没拿到 (可能是线程上下文丢失)，尝试从 McpTransportContext 拿
             if (token == null && ctx != null) {
                 try {
-                    // 使用反射调用 getHeaders() 以避开编译时找不到符号的问题
-                    java.lang.reflect.Method getHeadersMethod = ctx.getClass().getMethod("getHeaders");
-                    @SuppressWarnings("unchecked")
-                    java.util.Map<String, Object> headers = (java.util.Map<String, Object>) getHeadersMethod.invoke(ctx);
-                    
-                    if (headers != null) {
-                        String authHeader = (String) headers.get("Authorization");
+                    // 尝试获取 headers (根据官方 SDK 实现，Key 通常为 "headers")
+                    Object headersObj = ctx.get("headers");
+                    if (headersObj instanceof java.util.Map) {
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<String, Object> headers = (java.util.Map<String, Object>) headersObj;
+                        
+                        // 查找 Authorization (忽略大小写)
+                        String authHeader = null;
+                        for (java.util.Map.Entry<String, Object> entry : headers.entrySet()) {
+                            if ("Authorization".equalsIgnoreCase(entry.getKey())) {
+                                authHeader = String.valueOf(entry.getValue());
+                                break;
+                            }
+                        }
+                        
                         if (authHeader != null && authHeader.startsWith("Bearer ")) {
                             token = authHeader.substring(7);
-                            log.info("[CallAgentTool] 成功从 McpTransportContext (反射) 提取 Token");
+                            log.info("[CallAgentTool] 成功从 McpTransportContext 提取 Token");
                         }
+                    } else {
+                        log.debug("[CallAgentTool] Context 中未找到 headers map. ctx={}", ctx);
                     }
                 } catch (Throwable e) {
                     log.debug("[CallAgentTool] 从 McpTransportContext 获取 Header 失败: {}", e.getMessage());
