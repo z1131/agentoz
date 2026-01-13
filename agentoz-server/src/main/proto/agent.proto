@@ -30,14 +30,11 @@ service AgentService {
 // =============================================================================
 
 message RunTaskRequest {
-  string conversation_id = 1; // 仅用于日志追踪
-
-  // ✅ 强类型配置：不再是 JSON 字符串
+  string conversation_id = 1;
   SessionConfig config = 2;
-
-  // ✅ 强类型历史：不再是 JSON 字符串数组
-  repeated HistoryItem history = 3;
-
+  // 对话历史：直接透传 JSON 字符串列表
+  // 每一项对应 Codex 内部的一个 ThreadItem (Message, ToolCall, ToolResult 等)
+  repeated string history_json = 3;
   UserInput input = 4;
 }
 

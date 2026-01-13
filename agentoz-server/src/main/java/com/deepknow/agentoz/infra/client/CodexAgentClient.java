@@ -41,48 +41,16 @@ public class CodexAgentClient {
     /**
      * 执行代理任务 (流式返回)
      *
-     * <p>使用强类型Proto定义，将AgentConfigEntity转换为SessionConfig后调用Codex-Agent。</p>
-     *
-     * <h3>🔄 调用流程</h3>
-     * <pre>
-     * 1. AgentConfigEntity → SessionConfig (Proto)
-     * 2. List&lt;MessageDTO&gt; → List&lt;HistoryItem&gt; (Proto)
-     * 3. 构建 RunTaskRequest
-     * 4. 通过 Dubbo Triple 调用 Codex-Agent (StreamObserver回调)
-     * </pre>
-     *
-     * @param conversationId 会话ID（对齐Codex-Agent的conversation_id）
-     * @param config Agent配置实体
-     * @param history 历史消息列表（强类型）
-     * @param inputText 用户输入文本
+     * @param conversationId 会话ID
+     * @param request 预先构建好的请求对象
      * @param responseObserver 响应流观察者
      */
     public void runTask(
             String conversationId,
-            AgentConfigEntity config,
-            List<HistoryItem> history,
-            String inputText,
+            RunTaskRequest request,
             StreamObserver<RunTaskResponse> responseObserver
     ) {
-        // 1. 转换配置为Proto
-        SessionConfig sessionConfig = ConfigProtoConverter.toSessionConfig(config);
-
-        // 2. 构建用户输入
-        UserInput userInput = UserInput.newBuilder()
-                .setText(inputText)
-                .build();
-
-        // 3. 构建请求
-        RunTaskRequest request = RunTaskRequest.newBuilder()
-                .setConversationId(conversationId)
-                .setConfig(sessionConfig)
-                .addAllHistory(history)
-                .setInput(userInput)
-                .build();
-
-        // 4. 发起Dubbo Triple调用 (直接透传Observer)
-        log.info("发起 Codex-Agent 调用: conversationId={}, llmModel={}",
-                conversationId, config.getLlmModel());
+        log.info("发起 Codex-Agent 调用: conversationId={}", conversationId);
 
         try {
             agentRpcService.runTask(request, responseObserver);

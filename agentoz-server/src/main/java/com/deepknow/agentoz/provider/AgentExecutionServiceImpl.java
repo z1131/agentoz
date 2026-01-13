@@ -8,8 +8,8 @@ import com.deepknow.agentoz.api.dto.StreamChatRequest;
 import com.deepknow.agentoz.api.dto.StreamChatResponse;
 import com.deepknow.agentoz.api.dto.TaskResponse;
 import com.deepknow.agentoz.api.service.AgentExecutionService;
+import com.deepknow.agentoz.infra.converter.grpc.ConfigProtoConverter;
 import com.deepknow.agentoz.infra.converter.grpc.TaskResponseProtoConverter;
-import com.deepknow.agentoz.infra.converter.grpc.HistoryProtoConverter;
 import com.deepknow.agentoz.infra.client.CodexAgentClient;
 import com.deepknow.agentoz.infra.repo.AgentConfigRepository;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
@@ -17,7 +17,9 @@ import com.deepknow.agentoz.infra.util.StreamGuard;
 import com.deepknow.agentoz.infra.util.JwtUtils;
 import com.deepknow.agentoz.infra.history.ConversationHistoryManager;
 import com.deepknow.agentoz.infra.history.AgentContextManager;
-import codex.agent.HistoryItem;
+import codex.agent.RunTaskRequest;
+import codex.agent.UserInput;
+import codex.agent.RunTaskResponse;
 import com.deepknow.agentoz.model.AgentConfigEntity;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -125,27 +127,42 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 log.error("注入系统MCP失败", e);
             }
 
-            List<HistoryItem> historyItems = parseActiveContext(agent.getActiveContext());
+            // 步骤 3: 提取历史记录 (透传模式：直接提取 JSON 数组中的每一项)
+            List<String> historyJsonList = extractHistoryJsonList(agent.getActiveContext());
 
             log.info("准备调用Codex: agentId={}, model={}, historySize={}",
-                    finalAgentId, config.getLlmModel(), historyItems.size());
+                    finalAgentId, config.getLlmModel(), historyJsonList.size());
 
             // 步骤 4: 调用 Codex-Agent，并在响应返回时记录历史
+            RunTaskRequest requestParams = RunTaskRequest.newBuilder()
+                    .setConversationId(agent.getConversationId())
+                    .setConfig(ConfigProtoConverter.toSessionConfig(config))
+                    .addAllHistoryJson(historyJsonList) // 使用透传的 JSON 列表
+                    .setInput(UserInput.newBuilder().setText(userMessage).build())
+                    .build();
+
             codexAgentClient.runTask(
                     agent.getConversationId(),
-                    config,
-                    historyItems,
-                    userMessage,
-                    StreamGuard.wrapObserver(responseObserver, proto -> {
+                    requestParams,
+                    StreamGuard.wrapObserver(responseObserver, (RunTaskResponse proto) -> {
                         // 每次收到响应时
                         TaskResponse dto = TaskResponseProtoConverter.toTaskResponse(proto);
 
                         // 记录 Assistant 响应到会话历史 (使用 Agent 的真实名称)
                         if (dto.getFinalResponse() != null && !dto.getFinalResponse().isEmpty()) {
                             conversationHistoryManager.appendAssistantMessage(conversationId, dto.getFinalResponse(), agent.getAgentName());
+                        }
 
-                            // 记录该 Agent 内部的返回状态
-                            agentContextManager.onAgentResponse(finalAgentId, dto.getFinalResponse());
+                        // 核心：将 Codex 返回的新 Item (JSON) 直接追加到 Agent 的 activeContext
+                        if (proto.getNewItemsJsonCount() > 0) {
+                            for (String itemJson : proto.getNewItemsJsonList()) {
+                                agent.appendContext(itemJson, objectMapper);
+                            }
+                            // 异步更新 Agent 状态描述 (仅输出时)
+                            if (dto.getFinalResponse() != null && !dto.getFinalResponse().isEmpty()) {
+                                agent.updateOutputState(dto.getFinalResponse());
+                            }
+                            agentRepository.updateById(agent);
                         }
 
                         responseObserver.onNext(dto);
@@ -153,7 +170,7 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             );
         }, traceInfo);
     }
-    
+
     private String injectSystemMcp(String originalJson, String agentId, String conversationId) {
         try {
             ObjectNode rootNode;
@@ -194,18 +211,24 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
         };
     }
 
-    private List<HistoryItem> parseActiveContext(String activeContextJson) {
+    /**
+     * 辅助方法：将数据库存的 JSON 数组字符串拆分为 String 列表
+     */
+    private List<String> extractHistoryJsonList(String activeContextJson) {
         if (activeContextJson == null || activeContextJson.isEmpty() || "null".equals(activeContextJson)) {
             return List.of();
         }
         try {
-            List<com.deepknow.agentoz.dto.MessageDTO> messageDTOs = objectMapper.readValue(
-                    activeContextJson,
-                    new TypeReference<List<com.deepknow.agentoz.dto.MessageDTO>>() {}
-            );
-            return HistoryProtoConverter.toHistoryItemList(messageDTOs);
+            JsonNode node = objectMapper.readTree(activeContextJson);
+            List<String> items = new ArrayList<>();
+            if (node.isArray()) {
+                for (JsonNode item : node) {
+                    items.add(item.isTextual() ? item.asText() : item.toString());
+                }
+            }
+            return items;
         } catch (Exception e) {
-            log.warn("解析上下文失败: {}", e.getMessage());
+            log.warn("解析上下文 JSON 列表失败: {}", e.getMessage());
             return List.of();
         }
     }
