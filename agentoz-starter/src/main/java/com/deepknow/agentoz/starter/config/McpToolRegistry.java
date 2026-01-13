@@ -207,6 +207,9 @@ public class McpToolRegistry implements ApplicationContextAware {
      * 将 Map arguments 映射为 Java 方法参数
      */
     private Object[] resolveArguments(Method method, Map<String, Object> arguments, McpTransportContext ctx) {
+        if (arguments == null) {
+            arguments = Collections.emptyMap();
+        }
         Parameter[] parameters = method.getParameters();
         String[] paramNames = parameterNameDiscoverer.getParameterNames(method);
         Object[] args = new Object[parameters.length];
