@@ -25,19 +25,28 @@ public class McpSecurityUtils {
             // 尝试获取 Spring WebMVC 的请求上下文
             ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
             if (attributes == null) {
-                log.warn("[MCP Security] RequestAttributes is NULL. Are we in a Web request thread?");
+                log.warn("[MCP Security] ⚠️ RequestAttributes is NULL. Thread: {}", Thread.currentThread().getName());
                 return null;
             }
 
             HttpServletRequest request = attributes.getRequest();
             
-            // 调试日志：打印所有 Header (生产环境请注意脱敏)
-            log.info("[MCP Security] 收到请求: URI={}, Method={}", request.getRequestURI(), request.getMethod());
+            // --- 埋点开始 ---
+            log.info("=== MCP SECURITY DEBUG START ===");
+            log.info("URI: {}, Method: {}, Thread: {}", request.getRequestURI(), request.getMethod(), Thread.currentThread().getName());
             java.util.Enumeration<String> headerNames = request.getHeaderNames();
             while (headerNames.hasMoreElements()) {
                 String name = headerNames.nextElement();
-                log.debug("[MCP Security] Header: {} = {}", name, request.getHeader(name));
+                // 打印 Authorization 的长度而非内容，避免日志泄露，其他 Header 正常打印
+                String value = request.getHeader(name);
+                if ("Authorization".equalsIgnoreCase(name)) {
+                    log.info("Header [{}]: {}...", name, value != null && value.length() > 10 ? value.substring(0, 10) : value);
+                } else {
+                    log.info("Header [{}]: {}", name, value);
+                }
             }
+            log.info("=== MCP SECURITY DEBUG END ===");
+            // --- 埋点结束 ---
 
             // 1. 优先尝试 Header
             String authHeader = request.getHeader("Authorization");

@@ -49,27 +49,23 @@ public class CallAgentTool {
             // 2. 如果 Utils 没拿到 (可能是线程上下文丢失)，尝试从 McpTransportContext 拿
             if (token == null && ctx != null) {
                 try {
-                    // 尝试获取 headers (根据官方 SDK 实现，Key 通常为 "headers")
-                    Object headersObj = ctx.get("headers");
-                    if (headersObj instanceof java.util.Map) {
-                        @SuppressWarnings("unchecked")
-                        java.util.Map<String, Object> headers = (java.util.Map<String, Object>) headersObj;
+                    // 使用反射调用 getHeaders() 以避开编译时找不到符号的问题
+                    java.lang.reflect.Method getHeadersMethod = ctx.getClass().getMethod("getHeaders");
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, Object> headers = (java.util.Map<String, Object>) getHeadersMethod.invoke(ctx);
+                    
+                    if (headers != null) {
+                        // --- 埋点：打印 Context 中的所有 Header Key ---
+                        log.info("[CallAgentTool] McpTransportContext Headers Keys: {}", headers.keySet());
                         
-                        // 查找 Authorization (忽略大小写)
-                        String authHeader = null;
-                        for (java.util.Map.Entry<String, Object> entry : headers.entrySet()) {
-                            if ("Authorization".equalsIgnoreCase(entry.getKey())) {
-                                authHeader = String.valueOf(entry.getValue());
-                                break;
-                            }
-                        }
+                        String authHeader = (String) headers.get("Authorization");
+                        // 兼容大小写
+                        if (authHeader == null) authHeader = (String) headers.get("authorization");
                         
                         if (authHeader != null && authHeader.startsWith("Bearer ")) {
                             token = authHeader.substring(7);
-                            log.info("[CallAgentTool] 成功从 McpTransportContext 提取 Token");
+                            log.info("[CallAgentTool] 成功从 McpTransportContext (反射) 提取 Token");
                         }
-                    } else {
-                        log.debug("[CallAgentTool] Context 中未找到 headers map. ctx={}", ctx);
                     }
                 } catch (Throwable e) {
                     log.debug("[CallAgentTool] 从 McpTransportContext 获取 Header 失败: {}", e.getMessage());
@@ -84,6 +80,11 @@ public class CallAgentTool {
                 try {
                     Claims claims = jwtUtils.validateToken(token);
                     if (claims != null) {
+                        // --- 埋点：打印 Token 内的所有 Claims ---
+                        log.info("=== JWT CLAIMS DEBUG ===");
+                        claims.forEach((k, v) -> log.info("Claim [{}]: {}", k, v));
+                        log.info("========================");
+                        
                         sourceAgentId = claims.getSubject();
                         conversationId = claims.get("cid", String.class);
                         log.info("CallAgentTool: Token 解析成功. Subject={}, CID={}", sourceAgentId, conversationId);
