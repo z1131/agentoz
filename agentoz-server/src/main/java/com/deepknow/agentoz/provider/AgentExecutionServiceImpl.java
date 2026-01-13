@@ -236,15 +236,19 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 return;
             }
 
-            // 构造 HistoryItem JSON
-            ObjectNode messageItem = objectMapper.createObjectNode();
-            ObjectNode messageNode = messageItem.putObject("message");
-            messageNode.put("role", role);
+            // 构造 ResponseItem 格式的 JSON (符合 Codex 定义)
+            ObjectNode responseItem = objectMapper.createObjectNode();
+            responseItem.put("type", "message");
+            responseItem.put("role", role);
 
             // 构造 content 数组
             ObjectNode contentItem = objectMapper.createObjectNode();
+            contentItem.put("type", "input_text");  // 用户输入用 input_text
+            if ("assistant".equals(role)) {
+                contentItem.put("type", "output_text");  // assistant 响应用 output_text
+            }
             contentItem.put("text", content);
-            messageNode.set("content", objectMapper.createArrayNode().add(contentItem));
+            responseItem.set("content", objectMapper.createArrayNode().add(contentItem));
 
             // 追加到 historyContext
             String currentHistory = conversation.getHistoryContext();
@@ -254,7 +258,7 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
 
             JsonNode historyNode = objectMapper.readTree(currentHistory);
             if (historyNode.isArray()) {
-                ((ArrayNode) historyNode).add(messageItem);
+                ((ArrayNode) historyNode).add(responseItem);
                 conversation.setHistoryContext(objectMapper.writeValueAsString(historyNode));
 
                 // 更新辅助字段

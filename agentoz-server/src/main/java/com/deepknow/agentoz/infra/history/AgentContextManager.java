@@ -54,18 +54,20 @@ public class AgentContextManager {
                 return;
             }
 
-            // 1. 直接构造 JSON 格式的 HistoryItem
-            ObjectNode messageItem = objectMapper.createObjectNode();
-            ObjectNode messageNode = messageItem.putObject("message");
-            messageNode.put("role", role != null ? role : "user");
+            // 1. 直接构造 ResponseItem 格式 (符合 Codex 定义)
+            // 格式: {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "..."}]}
+            ObjectNode responseItem = objectMapper.createObjectNode();
+            responseItem.put("type", "message");
+            responseItem.put("role", role != null ? role : "user");
 
             // 构造 content 数组
             ObjectNode contentItem = objectMapper.createObjectNode();
+            contentItem.put("type", "input_text");
             contentItem.put("text", inputMessage);
-            messageNode.set("content", objectMapper.createArrayNode().add(contentItem));
+            responseItem.set("content", objectMapper.createArrayNode().add(contentItem));
 
             // 2. 将 JSON 字符串追加到 Agent 上下文
-            agent.appendContext(messageItem.toString(), objectMapper);
+            agent.appendContext(responseItem.toString(), objectMapper);
 
             // 3. 更新状态描述 (传入 Role/SenderName 以生成 [From XXX] 的摘要)
             agent.updateInputState(inputMessage, role);
@@ -98,18 +100,20 @@ public class AgentContextManager {
                 return;
             }
 
-            // 1. 直接构造 JSON 格式的 HistoryItem
-            ObjectNode messageItem = objectMapper.createObjectNode();
-            ObjectNode messageNode = messageItem.putObject("message");
-            messageNode.put("role", "assistant");
+            // 1. 直接构造 ResponseItem 格式 (符合 Codex 定义)
+            // 格式: {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "..."}]}
+            ObjectNode responseItem = objectMapper.createObjectNode();
+            responseItem.put("type", "message");
+            responseItem.put("role", "assistant");
 
             // 构造 content 数组
             ObjectNode contentItem = objectMapper.createObjectNode();
+            contentItem.put("type", "output_text");
             contentItem.put("text", responseMessage);
-            messageNode.set("content", objectMapper.createArrayNode().add(contentItem));
+            responseItem.set("content", objectMapper.createArrayNode().add(contentItem));
 
             // 2. 将 JSON 字符串追加到 Agent 上下文
-            agent.appendContext(messageItem.toString(), objectMapper);
+            agent.appendContext(responseItem.toString(), objectMapper);
 
             // 3. 更新状态
             agent.updateOutputState(responseMessage);
@@ -140,15 +144,16 @@ public class AgentContextManager {
                 return;
             }
 
-            // 直接构造 JSON 格式的 FunctionCallItem
-            ObjectNode functionCallItem = objectMapper.createObjectNode();
-            ObjectNode functionCallNode = functionCallItem.putObject("function_call");
-            functionCallNode.put("call_id", callId);
-            functionCallNode.put("name", toolName);
-            functionCallNode.put("arguments", arguments);
+            // 直接构造 ResponseItem 格式 (符合 Codex 定义)
+            // 格式: {"type": "function_call", "call_id": "...", "name": "...", "arguments": "..."}
+            ObjectNode responseItem = objectMapper.createObjectNode();
+            responseItem.put("type", "function_call");
+            responseItem.put("call_id", callId);
+            responseItem.put("name", toolName);
+            responseItem.put("arguments", arguments);
 
             // 将 JSON 字符串追加到 Agent 上下文
-            agent.appendContext(functionCallItem.toString(), objectMapper);
+            agent.appendContext(responseItem.toString(), objectMapper);
             
             // 更新状态描述 (简单追加)
             String currentDesc = agent.getStateDescription();
@@ -182,14 +187,15 @@ public class AgentContextManager {
                 return;
             }
 
-            // 直接构造 JSON 格式的 FunctionCallOutputItem
-            ObjectNode functionCallOutputItem = objectMapper.createObjectNode();
-            ObjectNode functionCallOutputNode = functionCallOutputItem.putObject("function_call_output");
-            functionCallOutputNode.put("call_id", callId);
-            functionCallOutputNode.put("output", output);
+            // 直接构造 ResponseItem 格式 (符合 Codex 定义)
+            // 格式: {"type": "function_call_output", "call_id": "...", "output": "..."}
+            ObjectNode responseItem = objectMapper.createObjectNode();
+            responseItem.put("type", "function_call_output");
+            responseItem.put("call_id", callId);
+            responseItem.put("output", output);
 
             // 将 JSON 字符串追加到 Agent 上下文
-            agent.appendContext(functionCallOutputItem.toString(), objectMapper);
+            agent.appendContext(responseItem.toString(), objectMapper);
             agentRepository.updateById(agent);
 
         } catch (Exception e) {

@@ -156,41 +156,24 @@ message SessionSource {
 }
 
 // =============================================================================
-// 2. HistoryItem (替代原 history_items_json)
+// 2. 历史记录定义 (简化版 - JSON 透传)
 // =============================================================================
 
-// 对应 Rust 中的 ResponseItem 枚举
-message HistoryItem {
-  oneof item {
-    MessageItem message = 1;
-    FunctionCallItem function_call = 2;
-    FunctionCallOutputItem function_call_output = 3;
-    // 简化处理，暂时只映射核心类型
-  }
-}
-
-message MessageItem {
-  string role = 1; // "user" | "assistant" | "system"
-  repeated ContentItem content = 2;
-}
-
-message ContentItem {
-  oneof content {
-    string text = 1;       // InputText / OutputText
-    string image_url = 2;  // InputImage
-  }
-}
-
-message FunctionCallItem {
-  string call_id = 1;
-  string name = 2;
-  string arguments = 3; // JSON 字符串
-}
-
-message FunctionCallOutputItem {
-  string call_id = 1;
-  string output = 2;    // JSON 字符串 (包含 success/content 等)
-}
+// 说明：历史记录直接使用 JSON 字符串透传，无需定义复杂的 Proto 结构
+//
+// 格式规范 (参考 Rust ResponseItem):
+// [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "..."}]}]
+//
+// 支持的类型:
+// - message: 普通消息 {"type": "message", "role": "user|assistant", "content": [...]}
+// - function_call: 函数调用 {"type": "function_call", "call_id": "...", "name": "...", "arguments": "..."}
+// - function_call_output: 函数返回 {"type": "function_call_output", "call_id": "...", "output": "..."}
+// - reasoning: 推理过程 {"type": "reasoning", "id": "...", "summary": [...]}
+// - custom_tool_call: 自定义工具 {"type": "custom_tool_call", "call_id": "...", "name": "...", "input": "..."}
+// - custom_tool_call_output: 自定义工具返回 {"type": "custom_tool_call_output", "call_id": "...", "output": "..."}
+// - compaction: 历史压缩 {"type": "compaction", "message": "..."}
+//
+// 注意：这里保留旧的定义是为了向后兼容，但建议直接使用 JSON 透传
 
 // =============================================================================
 // 辅助枚举
