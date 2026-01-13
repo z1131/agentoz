@@ -35,7 +35,7 @@ public class CallAgentTool {
     @Autowired
     private AgentRepository agentRepository;
 
-    @AgentTool(name = "call_agent", description = "调用另一个Agent执行任务，实现Agent间协作。可以指定目标Agent名称和具体任务。")
+    @AgentTool(name = "call_agent", description = "调用另一个Agent执行任务，实现Agent间协作。可以指定目标Agent名称和具体任务。" )
     public String callAgent(
             io.modelcontextprotocol.common.McpTransportContext ctx,
             @AgentParam(name = "targetAgentName", value = "目标Agent的名称（如 PaperSearcher）", required = true) String targetAgentName,
@@ -46,62 +46,52 @@ public class CallAgentTool {
             // 1. 身份识别 (优先使用通用的 SecurityUtils)
             String token = McpSecurityUtils.getCurrentToken();
             
-            // 2. 暴力探测 McpTransportContext (如果 SecurityUtils 失败)
+            // 2. 尝试从 McpTransportContext 拿 (因为 Starter 已将 Header 注入顶层)
             if (token == null && ctx != null) {
-                log.info("🔍 [MCP Debug] 开始探测 McpTransportContext: Class={}", ctx.getClass().getName());
                 try {
-                    // --- 方案 A: 尝试您指定的 http_headers ---
-                    Object hh = ctx.get("http_headers");
-                    log.info("🔍 [MCP Debug] ctx.get(\"http_headers\") -> {}", hh);
-                    if (hh instanceof java.util.Map) {
-                        token = extractTokenFromMap((java.util.Map<?, ?>) hh);
-                        if (token != null) log.info("✅ [MCP Debug] 从 http_headers 成功拿到 Token");
+                    // 优先拿我们自定义的特殊 Key
+                    Object securityToken = ctx.get("SECURITY_TOKEN");
+                    if (securityToken != null) {
+                        token = securityToken.toString();
+                        log.info("[CallAgentTool] 成功从 McpTransportContext [SECURITY_TOKEN] 提取 Token");
                     }
-
-                    // --- 方案 B: 尝试 headers ---
+                    
                     if (token == null) {
-                        Object h = ctx.get("headers");
-                        log.info("🔍 [MCP Debug] ctx.get(\"headers\") -> {}", h);
-                        if (h instanceof java.util.Map) {
-                            token = extractTokenFromMap((java.util.Map<?, ?>) h);
-                            if (token != null) log.info("✅ [MCP Debug] 从 headers 成功拿到 Token");
+                        // 尝试标准 Key
+                        Object auth = ctx.get("Authorization");
+                        if (auth == null) auth = ctx.get("authorization");
+                        if (auth != null) {
+                            token = auth.toString();
+                            log.info("[CallAgentTool] 成功从 McpTransportContext [Authorization] 提取 Token");
                         }
                     }
+                    
+                    // 清理 Bearer 前缀
+                    if (token != null && token.startsWith("Bearer ")) {
+                        token = token.substring(7);
+                    }
+                } catch (Throwable e) {
+                    log.debug("[CallAgentTool] 从 McpTransportContext 获取数据失败: {}", e.getMessage());
+                }
+            }
 
-                    // --- 方案 C: 暴力反射私有字段 (终极手段) ---
-                    if (token == null) {
-                        log.info("🔍 [MCP Debug] 正在反射探测对象结构...");
-                        for (java.lang.reflect.Field f : ctx.getClass().getDeclaredFields()) {
-                            try {
-                                f.setAccessible(true);
-                                Object val = f.get(ctx);
-                                log.info("🔍 [MCP Debug] Field [{}] -> {}", f.getName(), val);
-                                if (val instanceof java.util.Map) {
-                                    token = extractTokenFromMap((java.util.Map<?, ?>) val);
-                                    if (token != null) log.info("✅ [MCP Debug] 从私有字段 [{}] 成功拿到 Token", f.getName());
-                                }
-                            } catch (Exception ignored) {}
-                        }
-                        
-                        // 同时探测所有方法返回值
-                        for (java.lang.reflect.Method m : ctx.getClass().getMethods()) {
-                            if (m.getParameterCount() == 0 && !m.getName().startsWith("wait") && !m.getName().startsWith("notify")) {
-                                try {
-                                    Object val = m.invoke(ctx);
-                                    if (val != null) {
-                                        log.info("🔍 [MCP Debug] Method [{}] -> {}", m.getName(), val);
-                                        if (val instanceof java.util.Map) {
-                                            token = extractTokenFromMap((java.util.Map<?, ?>) val);
-                                            if (token != null) log.info("✅ [MCP Debug] 从方法 [{}] 成功拿到 Token", m.getName());
-                                        }
-                                    }
-                                } catch (Exception ignored) {}
+            // 3. 暴力探测 (最后的调试手段)
+            if (token == null && ctx != null) {
+                log.info("🔍 [MCP Debug] 注入探测开始...");
+                try {
+                    for (java.lang.reflect.Field f : ctx.getClass().getDeclaredFields()) {
+                        f.setAccessible(true);
+                        Object val = f.get(ctx);
+                        log.info("🔍 [MCP Debug] Field [{}] -> {}", f.getName(), val);
+                        if (val instanceof java.util.Map) {
+                            String found = extractTokenFromMap((java.util.Map<?, ?>) val);
+                            if (found != null) {
+                                token = found;
+                                log.info("✅ [MCP Debug] 从私有字段 [{}] 成功拿到 Token", f.getName());
                             }
                         }
                     }
-                } catch (Throwable e) {
-                    log.error("❌ [MCP Debug] 反射探测异常", e);
-                }
+                } catch (Exception ignored) {}
             }
 
             String sourceAgentId = "unknown";

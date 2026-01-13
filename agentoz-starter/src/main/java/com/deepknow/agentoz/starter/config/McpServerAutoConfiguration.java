@@ -45,6 +45,26 @@ public class McpServerAutoConfiguration {
         return WebMvcStatelessServerTransport.builder()
                 .objectMapper(objectMapper)
                 .messageEndpoint(properties.getHttpEndpoint())
+                // 关键：显式设置上下文提取器，将请求头注入到 McpTransportContext 中
+                .contextExtractor(request -> {
+                    java.util.Map<String, Object> contextMap = new java.util.HashMap<>();
+                    
+                    // 1. 提取所有 Header 到顶层
+                    request.headers().asHttpHeaders().forEach((name, values) -> {
+                        if (!values.isEmpty()) {
+                            contextMap.put(name, values.get(0));
+                            // 同时存一份全小写的，防止大小写问题
+                            contextMap.put(name.toLowerCase(), values.get(0));
+                        }
+                    });
+                    
+                    // 2. 额外存一份特殊的 Key 方便查找
+                    String auth = request.headers().firstHeader("Authorization");
+                    if (auth != null) contextMap.put("SECURITY_TOKEN", auth);
+
+                    log.info("[AgentOZ Starter] 上下文提取完成，Keys: {}", contextMap.keySet());
+                    return io.modelcontextprotocol.common.McpTransportContext.create(contextMap);
+                })
                 .build();
     }
 
