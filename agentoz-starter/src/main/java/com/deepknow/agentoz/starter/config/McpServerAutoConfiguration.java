@@ -62,7 +62,7 @@ public class McpServerAutoConfiguration {
                     String auth = request.headers().firstHeader("Authorization");
                     if (auth != null) contextMap.put("SECURITY_TOKEN", auth);
 
-                    log.info("[AgentOZ Starter] 上下文提取完成，Keys: {}", contextMap.keySet());
+                    log.debug("[AgentOZ Starter] 上下文提取完成，Keys: {}", contextMap.keySet());
                     return io.modelcontextprotocol.common.McpTransportContext.create(contextMap);
                 })
                 .build();
