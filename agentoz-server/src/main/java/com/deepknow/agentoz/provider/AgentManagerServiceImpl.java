@@ -228,6 +228,30 @@ public class AgentManagerServiceImpl implements AgentManagerService {
         log.info("会话结束成功: conversationId={}", conversationId);
     }
 
+    @Override
+    public String getConversationHistory(String conversationId) {
+        log.info("获取会话历史: conversationId={}", conversationId);
+
+        ConversationEntity conversation = conversationRepository.selectOne(
+                new LambdaQueryWrapper<ConversationEntity>()
+                        .eq(ConversationEntity::getConversationId, conversationId)
+        );
+
+        if (conversation == null) {
+            log.warn("会话不存在: conversationId={}", conversationId);
+            return "[]";
+        }
+
+        String historyContext = conversation.getHistoryContext();
+        if (historyContext == null || historyContext.isEmpty() || "null".equals(historyContext)) {
+            return "[]";
+        }
+
+        log.info("获取会话历史成功: conversationId={}, historyLength={}",
+                conversationId, historyContext.length());
+        return historyContext;
+    }
+
     /**
      * 创建Agent配置实体
      *

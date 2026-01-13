@@ -33,4 +33,11 @@ public interface AgentManagerService {
      * 结束会话
      */
     void endConversation(String conversationId);
+
+    /**
+     * 获取会话历史记录
+     * @param conversationId 会话ID
+     * @return 历史记录JSON数组字符串，格式：[{...}, {...}]
+     */
+    String getConversationHistory(String conversationId);
 }
