@@ -50,40 +50,53 @@ public class CallAgentTool {
             if (token == null && ctx != null) {
                 log.info("🔍 [MCP Debug] 开始探测 McpTransportContext: Class={}", ctx.getClass().getName());
                 try {
-                    // 反射打印所有无参方法的返回值
-                    for (java.lang.reflect.Method m : ctx.getClass().getMethods()) {
-                        if (m.getParameterCount() == 0 && !m.getName().equals("wait") && !m.getName().equals("notify")) {
+                    // --- 方案 A: 尝试您指定的 http_headers ---
+                    Object hh = ctx.get("http_headers");
+                    log.info("🔍 [MCP Debug] ctx.get(\"http_headers\") -> {}", hh);
+                    if (hh instanceof java.util.Map) {
+                        token = extractTokenFromMap((java.util.Map<?, ?>) hh);
+                        if (token != null) log.info("✅ [MCP Debug] 从 http_headers 成功拿到 Token");
+                    }
+
+                    // --- 方案 B: 尝试 headers ---
+                    if (token == null) {
+                        Object h = ctx.get("headers");
+                        log.info("🔍 [MCP Debug] ctx.get(\"headers\") -> {}", h);
+                        if (h instanceof java.util.Map) {
+                            token = extractTokenFromMap((java.util.Map<?, ?>) h);
+                            if (token != null) log.info("✅ [MCP Debug] 从 headers 成功拿到 Token");
+                        }
+                    }
+
+                    // --- 方案 C: 暴力反射私有字段 (终极手段) ---
+                    if (token == null) {
+                        log.info("🔍 [MCP Debug] 正在反射探测对象结构...");
+                        for (java.lang.reflect.Field f : ctx.getClass().getDeclaredFields()) {
                             try {
-                                Object val = m.invoke(ctx);
-                                log.info("🔍 [MCP Debug] Method [{}] -> {}", m.getName(), val);
-                                
-                                // 如果发现任何 Map 类型的返回值，检查里面是否有 Authorization
+                                f.setAccessible(true);
+                                Object val = f.get(ctx);
+                                log.info("🔍 [MCP Debug] Field [{}] -> {}", f.getName(), val);
                                 if (val instanceof java.util.Map) {
-                                    java.util.Map<?, ?> map = (java.util.Map<?, ?>) val;
-                                    for (Object key : map.keySet()) {
-                                        if (key != null && key.toString().equalsIgnoreCase("Authorization")) {
-                                            String valStr = map.get(key).toString();
-                                            if (valStr.startsWith("Bearer ")) {
-                                                token = valStr.substring(7);
-                                                log.info("✅ [MCP Debug] 成功通过方法 [{}] 找到 Token!");
-                                            }
-                                        }
-                                    }
+                                    token = extractTokenFromMap((java.util.Map<?, ?>) val);
+                                    if (token != null) log.info("✅ [MCP Debug] 从私有字段 [{}] 成功拿到 Token", f.getName());
                                 }
                             } catch (Exception ignored) {}
                         }
-                    }
-                    
-                    // 特别尝试通用的 get("headers")
-                    Object h = ctx.get("headers");
-                    log.info("🔍 [MCP Debug] ctx.get(\"headers\") -> {}", h);
-                    if (h instanceof java.util.Map) {
-                        java.util.Map<?, ?> headers = (java.util.Map<?, ?>) h;
-                        Object auth = headers.get("Authorization");
-                        if (auth == null) auth = headers.get("authorization");
-                        if (auth != null) {
-                            token = auth.toString().replace("Bearer ", "");
-                            log.info("✅ [MCP Debug] 成功通过 get(\"headers\") 找到 Token!");
+                        
+                        // 同时探测所有方法返回值
+                        for (java.lang.reflect.Method m : ctx.getClass().getMethods()) {
+                            if (m.getParameterCount() == 0 && !m.getName().startsWith("wait") && !m.getName().startsWith("notify")) {
+                                try {
+                                    Object val = m.invoke(ctx);
+                                    if (val != null) {
+                                        log.info("🔍 [MCP Debug] Method [{}] -> {}", m.getName(), val);
+                                        if (val instanceof java.util.Map) {
+                                            token = extractTokenFromMap((java.util.Map<?, ?>) val);
+                                            if (token != null) log.info("✅ [MCP Debug] 从方法 [{}] 成功拿到 Token", m.getName());
+                                        }
+                                    }
+                                } catch (Exception ignored) {}
+                            }
                         }
                     }
                 } catch (Throwable e) {
@@ -185,5 +198,18 @@ public class CallAgentTool {
             log.error("CallAgent 工具执行异常", e);
             return "Error: 工具执行失败 - " + e.getMessage();
         }
+    }
+
+    private String extractTokenFromMap(java.util.Map<?, ?> map) {
+        for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {
+            if (entry.getKey() != null && entry.getKey().toString().equalsIgnoreCase("Authorization")) {
+                String val = entry.getValue().toString();
+                if (val.startsWith("Bearer ")) {
+                    return val.substring(7);
+                }
+                return val;
+            }
+        }
+        return null;
     }
 }
