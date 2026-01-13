@@ -1,11 +1,14 @@
 package com.deepknow.agentoz.api.dto;
 
+import lombok.Data;
+
 import java.io.Serializable;
 import java.util.List;
 
 /**
  * 任务执行响应 (流式帧)
  */
+@Data
 public class TaskResponse implements Serializable {
     private static final long serialVersionUID = 1L;
 
@@ -51,27 +54,4 @@ public class TaskResponse implements Serializable {
         public long totalTokens;
     }
 
-    public TaskResponse() {}
-
-    // Getters and Setters
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-
-    public String getTextDelta() { return textDelta; }
-    public void setTextDelta(String textDelta) { this.textDelta = textDelta; }
-
-    public String getReasoningDelta() { return reasoningDelta; }
-    public void setReasoningDelta(String reasoningDelta) { this.reasoningDelta = reasoningDelta; }
-
-    public String getFinalResponse() { return finalResponse; }
-    public void setFinalResponse(String finalResponse) { this.finalResponse = finalResponse; }
-
-    public List<String> getNewItemsJson() { return newItemsJson; }
-    public void setNewItemsJson(List<String> newItemsJson) { this.newItemsJson = newItemsJson; }
-
-    public Usage getUsage() { return usage; }
-    public void setUsage(Usage usage) { this.usage = usage; }
-
-    public String getErrorMessage() { return errorMessage; }
-    public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
 }

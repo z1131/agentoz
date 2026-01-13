@@ -82,13 +82,6 @@ public class ConversationEntity {
     private String historyContext;
 
     /**
-     * 历史格式版本
-     *
-     * <p>用于标识 historyContext 的数据格式版本，便于未来升级迁移</p>
-     */
-    private String historyFormat;
-
-    /**
      * 历史消息总数
      *
      * <p>用于快速判断上下文长度，避免频繁解析 JSON</p>

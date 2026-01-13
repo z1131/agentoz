@@ -1,6 +1,8 @@
 package com.deepknow.agentoz.model;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.Data;
 import lombok.Builder;
 import lombok.NoArgsConstructor;
@@ -97,9 +99,9 @@ public class AgentEntity {
     /**
      * 全量历史记录（JSON格式）
      *
-     * <p>包含该Agent参与的所有对话历史（已废弃，建议使用 activeContext）</p>
+     * <p>包含该Agent参与的所有完整对话历史，不会被压缩</p>
+     * <p>用于审计、回溯或需要完整历史的场景</p>
      */
-    @Deprecated
     private String fullHistory;
 
     /**
@@ -125,13 +127,9 @@ public class AgentEntity {
      * </pre>
      *
      * <p>更新策略：每次该 Agent 被调用和返回时都追加</p>
+     * <p>注意：此字段可能被 Codex 压缩，用于实际计算；完整历史请查看 fullHistory</p>
      */
     private String activeContext;
-
-    /**
-     * 上下文格式版本
-     */
-    private String contextFormat;
 
     // ============================================================
     // 状态与生命周期 - State & Lifecycle
@@ -219,19 +217,21 @@ public class AgentEntity {
         /**
          * 追加上下文项
          *
-         * @param itemDto 要追加的对象 (DTO/POJO)
+         * @param itemJson JSON 字符串格式的 HistoryItem
          * @param mapper Jackson ObjectMapper
          */
-        public void appendContext(Object itemDto, com.fasterxml.jackson.databind.ObjectMapper mapper) {
+        public void appendContext(String itemJson, com.fasterxml.jackson.databind.ObjectMapper mapper) {
             try {
-                com.fasterxml.jackson.databind.node.ArrayNode root;
+                ArrayNode root;
                 if (this.activeContext == null || this.activeContext.isEmpty() || "null".equals(this.activeContext)) {
                     root = mapper.createArrayNode();
                 } else {
-                    com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(this.activeContext);
-                    root = node.isArray() ? (com.fasterxml.jackson.databind.node.ArrayNode) node : mapper.createArrayNode();
+                    JsonNode node = mapper.readTree(this.activeContext);
+                    root = node.isArray() ? (ArrayNode) node : mapper.createArrayNode();
                 }
-                root.addPOJO(itemDto);
+                // 将 JSON 字符串解析为 JsonNode 并添加到数组
+                JsonNode itemNode = mapper.readTree(itemJson);
+                root.add(itemNode);
                 this.activeContext = mapper.writeValueAsString(root);
             } catch (Exception e) {
                 // 简单吞掉或打印，实体内部不宜抛出复杂异常，或者抛出 RuntimeException
@@ -264,9 +264,6 @@ public class AgentEntity {
                 this.interactionCount = (this.interactionCount != null ? this.interactionCount : 0) + 1;
                 this.lastInteractionType = "input";
                 this.lastInteractionAt = LocalDateTime.now();
-                if (this.contextFormat == null) {
-                    this.contextFormat = "history_items_v1";
-                }
             }
         /**
          * 更新输出状态

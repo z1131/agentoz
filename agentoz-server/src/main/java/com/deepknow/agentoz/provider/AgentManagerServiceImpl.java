@@ -50,7 +50,6 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 .status("ACTIVE")
                 // 初始化历史相关字段
                 .historyContext("[]")  // 空数组
-                .historyFormat("history_items_v1")
                 .messageCount(0)
                 .lastMessageContent(null)
                 .lastMessageType(null)
@@ -126,7 +125,7 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 .state("ACTIVE")
                 // 初始化上下文相关字段
                 .activeContext("[]")  // 空数组
-                .contextFormat("history_items_v1")
+                .fullHistory("[]")   // 全量历史初始化为空数组
                 .stateDescription(null)
                 .interactionCount(0)
                 .lastInteractionType(null)

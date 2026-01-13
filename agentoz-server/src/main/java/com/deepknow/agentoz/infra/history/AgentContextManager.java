@@ -1,20 +1,14 @@
 package com.deepknow.agentoz.infra.history;
 
-import codex.agent.ContentItem;
-import codex.agent.HistoryItem;
-import codex.agent.MessageItem;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.deepknow.agentoz.dto.MessageDTO;
-import com.deepknow.agentoz.infra.converter.grpc.HistoryProtoConverter;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.model.AgentEntity;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Agent 上下文管理器
@@ -60,20 +54,18 @@ public class AgentContextManager {
                 return;
             }
 
-            // 1. 构建 Proto (保持内容纯净，不加前缀)
-            // LLM 协议强校验 role 必须为 user (对于输入消息)
-            MessageItem messageItem = MessageItem.newBuilder()
-                    .setRole("user") 
-                    .addContent(ContentItem.newBuilder().setText(inputMessage).build())
-                    .build();
+            // 1. 直接构造 JSON 格式的 HistoryItem
+            ObjectNode messageItem = objectMapper.createObjectNode();
+            ObjectNode messageNode = messageItem.putObject("message");
+            messageNode.put("role", role != null ? role : "user");
 
-            HistoryItem historyItem = HistoryItem.newBuilder()
-                    .setMessage(messageItem)
-                    .build();
+            // 构造 content 数组
+            ObjectNode contentItem = objectMapper.createObjectNode();
+            contentItem.put("text", inputMessage);
+            messageNode.set("content", objectMapper.createArrayNode().add(contentItem));
 
-            // 2. 转换为 DTO 并存储
-            MessageDTO dto = HistoryProtoConverter.toMessageDTO(historyItem);
-            agent.appendContext(dto, objectMapper);
+            // 2. 将 JSON 字符串追加到 Agent 上下文
+            agent.appendContext(messageItem.toString(), objectMapper);
 
             // 3. 更新状态描述 (传入 Role/SenderName 以生成 [From XXX] 的摘要)
             agent.updateInputState(inputMessage, role);
@@ -98,7 +90,7 @@ public class AgentContextManager {
 
         try {
             AgentEntity agent = agentRepository.selectOne(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentEntity>()
+                    new LambdaQueryWrapper<AgentEntity>()
                             .eq(AgentEntity::getAgentId, agentId)
             );
 
@@ -106,19 +98,18 @@ public class AgentContextManager {
                 return;
             }
 
-            // 1. 构建 Proto
-            MessageItem messageItem = MessageItem.newBuilder()
-                    .setRole("assistant")
-                    .addContent(ContentItem.newBuilder().setText(responseMessage).build())
-                    .build();
+            // 1. 直接构造 JSON 格式的 HistoryItem
+            ObjectNode messageItem = objectMapper.createObjectNode();
+            ObjectNode messageNode = messageItem.putObject("message");
+            messageNode.put("role", "assistant");
 
-            HistoryItem historyItem = HistoryItem.newBuilder()
-                    .setMessage(messageItem)
-                    .build();
+            // 构造 content 数组
+            ObjectNode contentItem = objectMapper.createObjectNode();
+            contentItem.put("text", responseMessage);
+            messageNode.set("content", objectMapper.createArrayNode().add(contentItem));
 
-            // 2. 转换为 DTO 并存储
-            MessageDTO dto = HistoryProtoConverter.toMessageDTO(historyItem);
-            agent.appendContext(dto, objectMapper);
+            // 2. 将 JSON 字符串追加到 Agent 上下文
+            agent.appendContext(messageItem.toString(), objectMapper);
 
             // 3. 更新状态
             agent.updateOutputState(responseMessage);
@@ -149,14 +140,15 @@ public class AgentContextManager {
                 return;
             }
 
-            // 构建简单的 Map 存储工具调用记录 (暂不使用 Proto 转换)
-            Map<String, Object> toolCall = new HashMap<>();
-            toolCall.put("type", "function_call");
-            toolCall.put("call_id", callId);
-            toolCall.put("name", toolName);
-            toolCall.put("arguments", arguments);
+            // 直接构造 JSON 格式的 FunctionCallItem
+            ObjectNode functionCallItem = objectMapper.createObjectNode();
+            ObjectNode functionCallNode = functionCallItem.putObject("function_call");
+            functionCallNode.put("call_id", callId);
+            functionCallNode.put("name", toolName);
+            functionCallNode.put("arguments", arguments);
 
-            agent.appendContext(toolCall, objectMapper);
+            // 将 JSON 字符串追加到 Agent 上下文
+            agent.appendContext(functionCallItem.toString(), objectMapper);
             
             // 更新状态描述 (简单追加)
             String currentDesc = agent.getStateDescription();
@@ -190,13 +182,14 @@ public class AgentContextManager {
                 return;
             }
 
-            // 构建 Map 存储结果
-            Map<String, Object> toolOutput = new HashMap<>();
-            toolOutput.put("type", "function_call_output");
-            toolOutput.put("call_id", callId);
-            toolOutput.put("output", output);
+            // 直接构造 JSON 格式的 FunctionCallOutputItem
+            ObjectNode functionCallOutputItem = objectMapper.createObjectNode();
+            ObjectNode functionCallOutputNode = functionCallOutputItem.putObject("function_call_output");
+            functionCallOutputNode.put("call_id", callId);
+            functionCallOutputNode.put("output", output);
 
-            agent.appendContext(toolOutput, objectMapper);
+            // 将 JSON 字符串追加到 Agent 上下文
+            agent.appendContext(functionCallOutputItem.toString(), objectMapper);
             agentRepository.updateById(agent);
 
         } catch (Exception e) {

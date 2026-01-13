@@ -15,22 +15,25 @@ import com.deepknow.agentoz.infra.repo.AgentConfigRepository;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.infra.util.StreamGuard;
 import com.deepknow.agentoz.infra.util.JwtUtils;
-import com.deepknow.agentoz.infra.history.ConversationHistoryManager;
 import com.deepknow.agentoz.infra.history.AgentContextManager;
+import com.deepknow.agentoz.infra.repo.ConversationRepository;
 import codex.agent.RunTaskRequest;
 import codex.agent.UserInput;
 import codex.agent.RunTaskResponse;
 import com.deepknow.agentoz.model.AgentConfigEntity;
 import com.deepknow.agentoz.model.AgentEntity;
+import com.deepknow.agentoz.model.ConversationEntity;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.common.stream.StreamObserver;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -54,7 +57,7 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
     private JwtUtils jwtUtils;
 
     @Autowired
-    private ConversationHistoryManager conversationHistoryManager;
+    private ConversationRepository conversationRepository;
 
     @Autowired
     private AgentContextManager agentContextManager;
@@ -109,9 +112,9 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 throw new AgentOzException(AgentOzErrorCode.CONFIG_NOT_FOUND, agent.getConfigId());
             }
 
-            // 步骤 1: 记录消息到公共会话历史 (不论角色，始终记录，支持 AgentName 显示)
-            String historyRole = (request.getSenderName() != null) ? request.getSenderName() : "user";
-            conversationHistoryManager.appendUserMessage(conversationId, userMessage, historyRole);
+            // 步骤 1: 追加用户消息到 ConversationEntity.historyContext
+            appendMessageToConversationHistory(conversationId, "user", userMessage,
+                request.getSenderName() != null ? request.getSenderName() : "user");
 
             // 步骤 2: 记录当前 Agent 被调用状态 (优先使用 SenderName 作为 Role 标识，用于状态描述)
             String contextRole = (request.getSenderName() != null) ? request.getSenderName() : request.getRole();
@@ -150,7 +153,8 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
 
                         // 记录 Assistant 响应到会话历史 (使用 Agent 的真实名称)
                         if (dto.getFinalResponse() != null && !dto.getFinalResponse().isEmpty()) {
-                            conversationHistoryManager.appendAssistantMessage(conversationId, dto.getFinalResponse(), agent.getAgentName());
+                            appendMessageToConversationHistory(conversationId, "assistant",
+                                dto.getFinalResponse(), agent.getAgentName());
                         }
 
                         // 核心：将 Codex 返回的新 Item (JSON) 直接追加到 Agent 的 activeContext
@@ -212,7 +216,73 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
     }
 
     /**
-     * 辅助方法：将数据库存的 JSON 数组字符串拆分为 String 列表
+     * 追加消息到会话历史 (JSON格式)
+     *
+     * @param conversationId 会话ID
+     * @param role 角色 (user/assistant)
+     * @param content 消息内容
+     * @param senderName 发送者名称 (用于显示)
+     */
+    private void appendMessageToConversationHistory(String conversationId, String role, String content, String senderName) {
+        try {
+            // 查询会话
+            ConversationEntity conversation = conversationRepository.selectOne(
+                    new LambdaQueryWrapper<ConversationEntity>()
+                            .eq(ConversationEntity::getConversationId, conversationId)
+            );
+
+            if (conversation == null) {
+                log.warn("会话不存在: conversationId={}", conversationId);
+                return;
+            }
+
+            // 构造 HistoryItem JSON
+            ObjectNode messageItem = objectMapper.createObjectNode();
+            ObjectNode messageNode = messageItem.putObject("message");
+            messageNode.put("role", role);
+
+            // 构造 content 数组
+            ObjectNode contentItem = objectMapper.createObjectNode();
+            contentItem.put("text", content);
+            messageNode.set("content", objectMapper.createArrayNode().add(contentItem));
+
+            // 追加到 historyContext
+            String currentHistory = conversation.getHistoryContext();
+            if (currentHistory == null || currentHistory.isEmpty() || "null".equals(currentHistory)) {
+                currentHistory = "[]";
+            }
+
+            JsonNode historyNode = objectMapper.readTree(currentHistory);
+            if (historyNode.isArray()) {
+                ((ArrayNode) historyNode).add(messageItem);
+                conversation.setHistoryContext(objectMapper.writeValueAsString(historyNode));
+
+                // 更新辅助字段
+                conversation.setLastMessageAt(LocalDateTime.now());
+                conversation.setLastMessageType(role);
+                conversation.setLastMessageContent(truncateText(content, 500));
+
+                Integer count = conversation.getMessageCount();
+                conversation.setMessageCount(count != null ? count + 1 : 1);
+
+                // 更新数据库
+                conversationRepository.updateById(conversation);
+            }
+        } catch (Exception e) {
+            log.error("追加消息到会话历史失败: conversationId={}", conversationId, e);
+        }
+    }
+
+    private String truncateText(String text, int maxLength) {
+        if (text == null) return null;
+        return text.length() <= maxLength ? text : text.substring(0, maxLength) + "...";
+    }
+
+    /**
+     * 辅助方法：将数据库存的 JSON 数组拆分为 String 列表
+     *
+     * <p>因为 activeContext 存储的是 JSON 数组字符串，而 proto 需要的是 repeated string，
+     * 所以需要把数组的每个元素转为单独的 JSON 字符串</p>
      */
     private List<String> extractHistoryJsonList(String activeContextJson) {
         if (activeContextJson == null || activeContextJson.isEmpty() || "null".equals(activeContextJson)) {
@@ -223,7 +293,8 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
             List<String> items = new ArrayList<>();
             if (node.isArray()) {
                 for (JsonNode item : node) {
-                    items.add(item.isTextual() ? item.asText() : item.toString());
+                    // 每个数组元素就是一个 HistoryItem 的 JSON
+                    items.add(item.toString());
                 }
             }
             return items;
