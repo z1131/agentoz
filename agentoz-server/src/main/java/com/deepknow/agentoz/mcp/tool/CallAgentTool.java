@@ -46,29 +46,48 @@ public class CallAgentTool {
             // 1. 身份识别 (优先使用通用的 SecurityUtils)
             String token = McpSecurityUtils.getCurrentToken();
             
-            // 2. 如果 Utils 没拿到 (可能是线程上下文丢失)，尝试从 McpTransportContext 拿
+            // 2. 暴力探测 McpTransportContext (如果 SecurityUtils 失败)
             if (token == null && ctx != null) {
+                log.info("🔍 [MCP Debug] 开始探测 McpTransportContext: Class={}", ctx.getClass().getName());
                 try {
-                    // 使用反射调用 getHeaders() 以避开编译时找不到符号的问题
-                    java.lang.reflect.Method getHeadersMethod = ctx.getClass().getMethod("getHeaders");
-                    @SuppressWarnings("unchecked")
-                    java.util.Map<String, Object> headers = (java.util.Map<String, Object>) getHeadersMethod.invoke(ctx);
+                    // 反射打印所有无参方法的返回值
+                    for (java.lang.reflect.Method m : ctx.getClass().getMethods()) {
+                        if (m.getParameterCount() == 0 && !m.getName().equals("wait") && !m.getName().equals("notify")) {
+                            try {
+                                Object val = m.invoke(ctx);
+                                log.info("🔍 [MCP Debug] Method [{}] -> {}", m.getName(), val);
+                                
+                                // 如果发现任何 Map 类型的返回值，检查里面是否有 Authorization
+                                if (val instanceof java.util.Map) {
+                                    java.util.Map<?, ?> map = (java.util.Map<?, ?>) val;
+                                    for (Object key : map.keySet()) {
+                                        if (key != null && key.toString().equalsIgnoreCase("Authorization")) {
+                                            String valStr = map.get(key).toString();
+                                            if (valStr.startsWith("Bearer ")) {
+                                                token = valStr.substring(7);
+                                                log.info("✅ [MCP Debug] 成功通过方法 [{}] 找到 Token!");
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                    }
                     
-                    if (headers != null) {
-                        // --- 埋点：打印 Context 中的所有 Header Key ---
-                        log.info("[CallAgentTool] McpTransportContext Headers Keys: {}", headers.keySet());
-                        
-                        String authHeader = (String) headers.get("Authorization");
-                        // 兼容大小写
-                        if (authHeader == null) authHeader = (String) headers.get("authorization");
-                        
-                        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-                            token = authHeader.substring(7);
-                            log.info("[CallAgentTool] 成功从 McpTransportContext (反射) 提取 Token");
+                    // 特别尝试通用的 get("headers")
+                    Object h = ctx.get("headers");
+                    log.info("🔍 [MCP Debug] ctx.get(\"headers\") -> {}", h);
+                    if (h instanceof java.util.Map) {
+                        java.util.Map<?, ?> headers = (java.util.Map<?, ?>) h;
+                        Object auth = headers.get("Authorization");
+                        if (auth == null) auth = headers.get("authorization");
+                        if (auth != null) {
+                            token = auth.toString().replace("Bearer ", "");
+                            log.info("✅ [MCP Debug] 成功通过 get(\"headers\") 找到 Token!");
                         }
                     }
                 } catch (Throwable e) {
-                    log.debug("[CallAgentTool] 从 McpTransportContext 获取 Header 失败: {}", e.getMessage());
+                    log.error("❌ [MCP Debug] 反射探测异常", e);
                 }
             }
 
