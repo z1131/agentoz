@@ -49,6 +49,10 @@ public class ConfigProtoConverter {
             return SessionConfig.getDefaultInstance();
         }
 
+        // DEBUG: 打印原始实体数据
+        log.info("[DEBUG] AgentConfigEntity: llmModel={}, modelProvider={}, providerInfo={}", 
+            entity.getLlmModel(), entity.getModelProvider(), entity.getProviderInfo());
+
         SessionConfig.Builder builder = SessionConfig.newBuilder();
 
         // 1. 模型配置
