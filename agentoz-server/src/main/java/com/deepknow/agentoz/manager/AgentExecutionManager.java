@@ -128,16 +128,22 @@ public class AgentExecutionManager {
             final String finalAgentId = agentId;
 
             // 9. 调用 Codex-Agent
+            log.info("即将调用 codexAgentClient.runTask(), conversationId={}", agent.getConversationId());
             codexAgentClient.runTask(
                     agent.getConversationId(),
                     requestParams,
                     new org.apache.dubbo.common.stream.StreamObserver<>() {
                         @Override
                         public void onNext(codex.agent.RunTaskResponse proto) {
+                            log.info("收到 Codex 响应: eventCase={}", proto.getEventCase());
                             try {
                                 // 转换为内部事件
                                 InternalCodexEvent event = InternalCodexEventConverter.toInternalEvent(proto);
-                                if (event == null) return;
+                                if (event == null) {
+                                    log.warn("转换后事件为 null, eventCase={}", proto.getEventCase());
+                                    return;
+                                }
+                                log.info("转换后事件: status={}, eventType={}", event.getStatus(), event.getEventType());
 
                                 // 收集文本响应（用于会话历史）
                                 collectTextResponse(event, fullResponseBuilder);
@@ -157,17 +163,18 @@ public class AgentExecutionManager {
 
                         @Override
                         public void onError(Throwable t) {
-                            log.error("Codex 调用失败: {}", traceInfo, t);
+                            log.error("Codex 流错误回调触发: {}", traceInfo, t);
                             onError.accept(t);
                         }
 
                         @Override
                         public void onCompleted() {
-                            log.info("Codex 调用完成: {}", traceInfo);
+                            log.info("Codex 流完成回调触发: {}", traceInfo);
                             onCompleted.run();
                         }
                     }
             );
+            log.info("codexAgentClient.runTask() 调用已发起（异步）, conversationId={}", agent.getConversationId());
 
         } catch (Exception e) {
             log.error("执行任务失败: {}", traceInfo, e);
