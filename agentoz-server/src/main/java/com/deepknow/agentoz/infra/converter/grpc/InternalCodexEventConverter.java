@@ -31,10 +31,14 @@ public class InternalCodexEventConverter {
             case CODEX_EVENT_JSON -> {
                 String eventJson = protoResponse.getCodexEventJson();
                 String eventType = extractEventType(eventJson);
+                log.info("CODEX_EVENT_JSON: type={}, json={}", eventType, 
+                    eventJson.length() > 200 ? eventJson.substring(0, 200) + "..." : eventJson);
                 yield InternalCodexEvent.processing(eventType, eventJson);
             }
             case ADAPTER_LOG -> {
-                yield InternalCodexEvent.log(protoResponse.getAdapterLog());
+                String logMsg = protoResponse.getAdapterLog();
+                log.info("ADAPTER_LOG: {}", logMsg);
+                yield InternalCodexEvent.log(logMsg);
             }
             case ERROR -> {
                 log.error("Codex error: {}", protoResponse.getError());
