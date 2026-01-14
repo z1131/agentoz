@@ -255,6 +255,13 @@ public class AgentManagerServiceImpl implements AgentManagerService {
     /**
      * 创建Agent配置实体
      *
+     * <p>适配新的 adapter.proto 结构:
+     * <ul>
+     *   <li>provider -> modelProvider + providerInfo</li>
+     *   <li>移除 reasoningEffort, reasoningSummary, compactPrompt, modelOverrides, sessionSource</li>
+     * </ul>
+     * </p>
+     *
      * @param apiConfig API层的AgentConfigDTO
      * @return configId
      */
@@ -271,36 +278,28 @@ public class AgentManagerServiceImpl implements AgentManagerService {
             log.warn("API Config 的 mcpConfigJson 为空! ConfigName={}", apiConfig.getConfigName());
         }
 
-        // 转换API层DTO到Server层VO (Assembler)
-        var provider = ConfigApiAssembler.toProviderConfig(apiConfig.getProvider());
-        var modelOverrides = ConfigApiAssembler.toModelOverrides(apiConfig.getModelOverrides());
-        var sessionSource = ConfigApiAssembler.toSessionSource(apiConfig.getSessionSource());
+        // 转换API层DTO到新版Server层VO（适配 adapter.proto）
+        var providerInfo = ConfigApiAssembler.toModelProviderInfo(apiConfig.getProvider());
 
-        // 构建配置实体
+        // 构建配置实体（新版结构）
         AgentConfigEntity configEntity = AgentConfigEntity.builder()
                 .configId(configId)
                 .configName(apiConfig.getConfigName() != null ? apiConfig.getConfigName() : "默认配置-" + configId.substring(4, 12))
                 .description(apiConfig.getDescription())
                 .tags(apiConfig.getTags())
-                // 基础环境
-                .provider(provider)  // 转换后的Server层DTO
+                // 模型提供者配置（新版）
+                .modelProvider(apiConfig.getProvider() != null ? apiConfig.getProvider().getName() : null)
+                .providerInfo(providerInfo)
                 .llmModel(apiConfig.getLlmModel())
                 .cwd(apiConfig.getCwd())
                 // 策略配置
                 .approvalPolicy(apiConfig.getApprovalPolicy())
                 .sandboxPolicy(apiConfig.getSandboxPolicy())
-                // 指令配置
+                // 指令配置（baseInstructions 已在新版中移除）
                 .developerInstructions(apiConfig.getDeveloperInstructions())
                 .userInstructions(apiConfig.getUserInstructions())
-                .baseInstructions(apiConfig.getBaseInstructions())
-                // 推理配置
-                .reasoningEffort(apiConfig.getReasoningEffort())
-                .reasoningSummary(apiConfig.getReasoningSummary())
-                .compactPrompt(apiConfig.getCompactPrompt())
-                // 高级配置
-                .modelOverrides(modelOverrides)  // 转换后的Server层DTO
-                .mcpConfigJson(apiConfig.getMcpConfigJson()) // ✅ 直接使用 JSON 字符串
-                .sessionSource(sessionSource)  // 转换后的Server层DTO
+                // MCP配置（保持JSON字符串）
+                .mcpConfigJson(apiConfig.getMcpConfigJson())
                 // 元数据
                 .isTemplate(false)
                 .createdAt(LocalDateTime.now())

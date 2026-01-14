@@ -16,223 +16,183 @@ option java_generate_equals_and_hash = true;
 // 服务定义 - Service Definition
 // =============================================================================
 
+// 统一的智能体服务接口 (对齐 codex-rs/adapter)
 service AgentService {
-  // 执行一次代理任务 (无状态设计)
-  // 必须传递结构化的 SessionConfig 和完整的 HistoryItem 列表
-  rpc RunTask (RunTaskRequest) returns (stream RunTaskResponse);
-
-  // 全双工实时对话接口
-  rpc RealtimeChat (stream ChatRequest) returns (stream ChatResponse);
+  // 执行一个智能体任务 (如代码重构、搜索验证等)
+  // 这是一个服务器流式 RPC，实时返回任务执行过程中的每一个事件。
+  rpc RunTask(RunTaskRequest) returns (stream RunTaskResponse);
 }
 
 // =============================================================================
-// 主请求结构
+// 主请求结构 (对齐 adapter.proto)
 // =============================================================================
 
 message RunTaskRequest {
-  string conversation_id = 1;
-  SessionConfig config = 2;
-  // 对话历史：直接透传 JSON 字符串列表
-  // 每一项对应 Codex 内部的一个 ThreadItem (Message, ToolCall, ToolResult 等)
-  repeated string history_json = 3;
-  UserInput input = 4;
+  // 任务请求唯一 ID (用于链路追踪)
+  string request_id = 1;
+
+  // 会话唯一 ID (UUID)
+  // 用于关联和恢复之前的会话状态 (对应原 conversation_id)
+  string session_id = 2;
+
+  // 用户指令 (Prompt)
+  string prompt = 3;
+
+  // 会话配置 (严格对齐 Codex ConfigToml 内核)
+  SessionConfig session_config = 4;
+
+  // 初始文件上下文
+  repeated File context_files = 5;
+
+  // 环境变量覆盖 (用于传递敏感 Key，如 API_KEY)
+  map<string, string> env_vars = 6;
+
+  // 基础工作目录
+  string base_dir = 7;
+
+  // 历史会话数据 (Codex 原生 JSONL 格式)
+  // 如果非空，Adapter 会复活该会话并继续执行
+  // ⚠️ 这是核心变化：从 repeated string history_json 改为 bytes
+  bytes history_rollout = 8;
 }
 
 // =============================================================================
-// 1. SessionConfig (替代原 config_json)
+// SessionConfig (对齐 adapter.proto)
 // =============================================================================
 
 message SessionConfig {
-  // --- 基础环境 ---
-  ProviderConfig provider = 1;   // 模型提供商
-  string model = 2;              // 模型名称 (e.g., "gpt-4o")
-  string cwd = 3;                // 工作目录 (绝对路径)
+  // 模型名称 (e.g., "gpt-4o", "qwen-max")
+  string model = 1;
 
-  // --- 策略配置 ---
-  optional ApprovalPolicy approval_policy = 4;
-  optional SandboxPolicy sandbox_policy = 5;
+  // 模型提供商名称 (e.g., "openai", "qwen")
+  string model_provider = 2;
 
-  // --- 指令配置 ---
-  optional string developer_instructions = 6; // 开发者指令 (最高优先级)
-  optional string user_instructions = 7;      // 用户指令
-  optional string base_instructions = 8;      // 基础指令 (覆盖默认)
+  // 模型提供商详细配置
+  ModelProviderInfo provider_info = 3;
 
-  // --- 推理配置 ---
-  optional ReasoningEffort model_reasoning_effort = 12;  // 推理努力程度
-  optional ReasoningSummary model_reasoning_summary = 13; // 推理摘要模式
+  // 用户指令
+  optional string instructions = 4;
 
-  // --- 提示词优化 ---
-  optional string compact_prompt = 14;  // 压缩提示词覆盖
+  // 开发者指令 (最高优先级)
+  optional string developer_instructions = 5;
 
-  // --- 模型能力覆盖 (Model Overrides) ---
-  optional ModelOverrides model_overrides = 9;
+  // 审批策略
+  ApprovalPolicy approval_policy = 6;
 
-  // --- MCP 配置 (JSON 格式) ---
-  // JSON 格式的 MCP 服务器配置，直接使用 codex 的 McpServerConfig 结构
-  // 支持两种格式：
-  // 1. {"mcp_servers": {"server_name": {...}}}
-  // 2. {"server_name": {...}}
-  //
-  // 每个 MCP 服务器配置支持的字段（参考 codex McpServerConfig）：
-  // - transport (必需): stdio 或 streamable_http
-  //   * stdio: {"command": "npx", "args": ["-y", "@server"], "env": {...}, "cwd": "..."}
-  //   * streamable_http: {"url": "...", "bearer_token_env_var": "...", "http_headers": {...}}
-  // - enabled (可选): 是否启用，默认 true
-  // - startup_timeout_sec (可选): 启动超时（秒）
-  // - tool_timeout_sec (可选): 工具调用超时（秒）
-  // - enabled_tools (可选): 启用的工具白名单
-  // - disabled_tools (可选): 禁用的工具黑名单
-  //
-  // 示例：
-  // {
-  //   "mcp_servers": {
-  //     "filesystem": {
-  //       "command": "npx",
-  //       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"],
-  //       "enabled": true,
-  //       "tool_timeout_sec": 30
-  //     },
-  //     "github": {
-  //       "url": "https://api.github.com/mcp",
-  //       "bearer_token_env_var": "GITHUB_TOKEN"
-  //     }
-  //   }
-  // }
-  optional string mcp_config_json = 15;
+  // 沙箱策略
+  SandboxPolicy sandbox_policy = 7;
 
-  // --- 扩展配置 ---
-  optional SessionSource session_source = 11;    // 调用来源标识
+  // 工作目录 (绝对路径)
+  string cwd = 8;
+
+  // MCP 服务器配置 (结构化定义)
+  map<string, McpServerDef> mcp_servers = 9;
 }
 
 // =============================================================================
-// 推理配置枚举
+// 模型提供商配置 (对齐 adapter.proto)
 // =============================================================================
 
-enum ReasoningEffort {
-  REASONING_EFFORT_UNSPECIFIED = 0;
-  REASONING_NONE = 1;        // 无推理
-  MINIMAL = 2;     // 最小推理
-  LOW = 3;         // 低推理
-  MEDIUM = 4;      // 中等推理 (默认)
-  HIGH = 5;        // 高推理
-}
+message ModelProviderInfo {
+  // 提供商名称 (e.g., "openai", "qwen", "deepseek")
+  string name = 1;
 
-enum ReasoningSummary {
-  REASONING_SUMMARY_UNSPECIFIED = 0;
-  AUTO = 1;        // 自动模式 (默认)
-  CONCISE = 2;     // 简洁摘要
-  DETAILED = 3;    // 详细摘要
-  REASONING_SUMMARY_NONE = 4;        // 无摘要
-}
+  // API 基础 URL (e.g., "https://dashscope.aliyuncs.com/compatible-mode/v1")
+  optional string base_url = 2;
 
-message ProviderConfig {
-  string name = 1;                      // e.g., "openai", "qwen"
-  optional string base_url = 2;         // e.g., "https://dashscope..."
-  optional string api_key = 3;          // 对应 experimental_bearer_token
-  optional string wire_api = 4;         // "chat" | "responses"
-}
+  // 环境变量 Key 名称 (用于从 env_vars 中获取 API Key)
+  optional string env_key = 3;
 
-message ModelOverrides {
-  // Shell 工具类型: "Default" (OpenAI), "Disabled" (国产模型), "ShellCommand"
-  optional string shell_type = 1;
+  // 直接传递的 Bearer Token (优先级高于 env_key)
+  optional string experimental_bearer_token = 4;
 
-  // 是否支持并行工具调用 (Qwen/Claude=true, OpenAI/DeepSeek=false)
-  optional bool supports_parallel_tool_calls = 2;
+  // Wire API 类型
+  WireApi wire_api = 5;
 
-  // 补丁工具类型: "Required" (OpenAI), null (其他)
-  optional string apply_patch_tool_type = 3;
+  // 自定义 HTTP 请求头
+  map<string, string> http_headers = 6;
 
-  // 上下文窗口大小
-  optional uint64 context_window = 4;
+  // 自定义查询参数
+  map<string, string> query_params = 7;
 
-  // 自动压缩历史的阈值
-  optional uint64 auto_compact_token_limit = 5;
-}
-
-message SessionSource {
-  string source_type = 1;      // "API", "IDE", "CLI"
-  optional string integration_name = 2;
-  optional string integration_version = 3;
+  // 是否需要 OpenAI 认证格式
+  bool requires_openai_auth = 8;
 }
 
 // =============================================================================
-// 2. 历史记录定义 (简化版 - JSON 透传)
+// MCP 服务器定义 (对齐 adapter.proto)
 // =============================================================================
 
-// 说明：历史记录直接使用 JSON 字符串透传，无需定义复杂的 Proto 结构
-//
-// 格式规范 (参考 Rust ResponseItem):
-// [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "..."}]}]
-//
-// 支持的类型:
-// - message: 普通消息 {"type": "message", "role": "user|assistant", "content": [...]}
-// - function_call: 函数调用 {"type": "function_call", "call_id": "...", "name": "...", "arguments": "..."}
-// - function_call_output: 函数返回 {"type": "function_call_output", "call_id": "...", "output": "..."}
-// - reasoning: 推理过程 {"type": "reasoning", "id": "...", "summary": [...]}
-// - custom_tool_call: 自定义工具 {"type": "custom_tool_call", "call_id": "...", "name": "...", "input": "..."}
-// - custom_tool_call_output: 自定义工具返回 {"type": "custom_tool_call_output", "call_id": "...", "output": "..."}
-// - compaction: 历史压缩 {"type": "compaction", "message": "..."}
-//
-// 注意：这里保留旧的定义是为了向后兼容，但建议直接使用 JSON 透传
+message McpServerDef {
+  // 服务类型: "stdio" 或 "streamable_http"
+  string server_type = 1;
+
+  // stdio 模式: 启动命令 (e.g., "npx", "python")
+  string command = 2;
+
+  // stdio 模式: 命令参数
+  repeated string args = 3;
+
+  // stdio 模式: 环境变量
+  map<string, string> env = 4;
+
+  // streamable_http 模式: 服务 URL
+  string url = 5;
+}
 
 // =============================================================================
-// 辅助枚举
+// 枚举定义 (对齐 adapter.proto)
 // =============================================================================
+
+enum WireApi {
+  WIRE_API_CHAT = 0;
+  WIRE_API_RESPONSES = 1;
+  WIRE_API_RESPONSES_WEBSOCKET = 2;
+}
 
 enum ApprovalPolicy {
-  AUTO_APPROVE = 0;
-  MANUAL_APPROVE = 1;
-  BLOCK_ALL = 2;
+  APPROVAL_POLICY_UNSPECIFIED = 0;
+  ALWAYS = 1;          // 总是需要审批
+  NEVER = 2;           // 从不需要审批 (自动执行)
+  UNLESS_TRUSTED = 3;  // 除非是受信任的操作
 }
 
 enum SandboxPolicy {
-  READ_ONLY = 0;
-  SANDBOXED = 1;
-  INSECURE = 2; // 慎用
+  SANDBOX_POLICY_UNSPECIFIED = 0;
+  WORKSPACE_WRITE = 1;      // 仅允许写入工作区
+  READ_ONLY = 2;            // 只读模式
+  DANGER_FULL_ACCESS = 3;   // 危险：完全访问权限
 }
 
-message UserInput {
-  oneof content {
-    string text = 1;
-  }
+// =============================================================================
+// 文件上下文 (对齐 adapter.proto)
+// =============================================================================
+
+message File {
+  // 相对路径 (相对于 base_dir)
+  string path = 1;
+
+  // 文件内容 (二进制)
+  bytes content = 2;
 }
+
+// =============================================================================
+// 响应结构 (对齐 adapter.proto - 事件驱动模式)
+// =============================================================================
 
 message RunTaskResponse {
-  enum Status {
-    STATUS_UNSPECIFIED = 0;
-    FINISHED = 1;
-    NEED_USER_INPUT = 2;
-    MAX_TURNS_REACHED = 3;
-    ERROR = 4;
-    PROCESSING = 5;
-  }
-  Status status = 1;
-  repeated string new_items_json = 2; // 响应仍保持 JSON 以简化
-  string final_response = 3;
-  TokenUsage usage = 4;
-  string error_message = 5;
-  string text_delta = 6;
-}
+  oneof event {
+    // 原始 Codex JSONL 事件 (包含思考过程、工具调用等)
+    string codex_event_json = 1;
 
-message TokenUsage {
-  int64 prompt_tokens = 1;
-  int64 completion_tokens = 2;
-  int64 total_tokens = 3;
-}
+    // 系统日志 (仅包含关键状态变迁)
+    string adapter_log = 2;
 
-message ChatRequest {
-  oneof payload {
-    // 握手帧: 使用强类型 SessionConfig (与 RunTask 统一)
-    SessionConfig session_config = 1;
-    bytes audio_chunk = 2;
-    string text_chunk = 3;
-  }
-}
+    // 错误信息
+    string error = 3;
 
-message ChatResponse {
-  oneof payload {
-    string stt_intermediate = 1;
-    string agent_response_delta = 2;
-    string error_message = 3;
+    // 任务成功结束后的最新"灵魂"数据 (JSONL 格式)
+    // ⚠️ 核心：这是 Agent 下次请求时需要传回的 history_rollout
+    bytes updated_rollout = 4;
   }
 }

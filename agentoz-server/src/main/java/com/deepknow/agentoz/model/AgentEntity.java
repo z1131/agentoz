@@ -1,14 +1,13 @@
 package com.deepknow.agentoz.model;
 
 import com.baomidou.mybatisplus.annotation.*;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.Data;
 import lombok.Builder;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.Base64;
 
 /**
  * Agent业务实体（轻量级）
@@ -101,33 +100,30 @@ public class AgentEntity {
      *
      * <p>包含该Agent参与的所有完整对话历史，不会被压缩</p>
      * <p>用于审计、回溯或需要完整历史的场景</p>
+     * <p>⚠️ 此字段不参与 Codex 计算，仅用于业务展示</p>
      */
     private String fullHistory;
 
     /**
-     * 活跃上下文（JSON格式）
+     * 活跃上下文（Base64 编码的 JSONL 二进制数据）
      *
-     * <p>存储与该 Agent 相关的所有交互，包含：</p>
+     * <h3>🔄 新版设计 (对齐 Codex Adapter)</h3>
+     * <p>此字段直接存储 Codex 返回的 {@code updated_rollout} 二进制数据，
+     * 使用 Base64 编码以适配数据库 TEXT 类型。</p>
+     *
+     * <h3>📦 数据格式</h3>
      * <ul>
-     *   <li>用户直接发送给该 Agent 的消息 (MessageItem)</li>
-     *   <li>该 Agent 的所有响应 (MessageItem)</li>
-     *   <li>其他 Agent 调用该 Agent 的消息 (MessageItem/FunctionCallItem)</li>
-     *   <li>该 Agent 调用工具的记录 (FunctionCallItem)</li>
-     *   <li>工具返回的结果 (FunctionCallOutputItem)</li>
+     *   <li>原始格式：Codex 原生 JSONL（每行一个 JSON 对象）</li>
+     *   <li>存储格式：Base64(JSONL bytes)</li>
      * </ul>
      *
-     * <p>格式：JSON 数组，每个元素是一个 HistoryItem</p>
+     * <h3>🔁 使用流程</h3>
      * <pre>
-     * [
-     *   {"message": {"role": "user", "content": [{"text": "帮我查天气"}]}},
-     *   {"message": {"role": "assistant", "content": [{"text": "好的，我来查询"}]}},
-     *   {"function_call": {"call_id": "call_123", "name": "get_weather", "arguments": "{...}"}},
-     *   {"function_call_output": {"call_id": "call_123", "output": "{...}"}}
-     * ]
+     * 1. 请求时：Base64 解码 → bytes → 传给 Codex 的 history_rollout
+     * 2. 响应时：Codex 返回 updated_rollout → Base64 编码 → 存储
      * </pre>
      *
-     * <p>更新策略：每次该 Agent 被调用和返回时都追加</p>
-     * <p>注意：此字段可能被 Codex 压缩，用于实际计算；完整历史请查看 fullHistory</p>
+     * <p>⚠️ 此字段参与 Codex 计算，由 Codex 内部管理压缩和状态</p>
      */
     private String activeContext;
 
@@ -212,31 +208,48 @@ public class AgentEntity {
 
         // ============================================================
 
-    
+        /**
+         * 获取活跃上下文的原始字节数据
+         *
+         * <p>将 Base64 编码的 activeContext 解码为原始 JSONL 字节数组，
+         * 用于传递给 Codex 的 history_rollout 字段</p>
+         *
+         * @return JSONL 格式的字节数组，如果为空则返回空数组
+         */
+        public byte[] getActiveContextBytes() {
+            if (this.activeContext == null || this.activeContext.isEmpty()) {
+                return new byte[0];
+            }
+            try {
+                return Base64.getDecoder().decode(this.activeContext);
+            } catch (IllegalArgumentException e) {
+                // 兼容旧数据：如果不是 Base64 格式，可能是旧的 JSON 格式，返回空
+                return new byte[0];
+            }
+        }
 
         /**
-         * 追加上下文项
+         * 设置活跃上下文（从字节数据）
          *
-         * @param itemJson JSON 字符串格式的 HistoryItem
-         * @param mapper Jackson ObjectMapper
+         * <p>将 Codex 返回的 updated_rollout 字节数组编码为 Base64 并存储</p>
+         *
+         * @param rolloutBytes Codex 返回的 JSONL 格式字节数组
          */
-        public void appendContext(String itemJson, com.fasterxml.jackson.databind.ObjectMapper mapper) {
-            try {
-                ArrayNode root;
-                if (this.activeContext == null || this.activeContext.isEmpty() || "null".equals(this.activeContext)) {
-                    root = mapper.createArrayNode();
-                } else {
-                    JsonNode node = mapper.readTree(this.activeContext);
-                    root = node.isArray() ? (ArrayNode) node : mapper.createArrayNode();
-                }
-                // 将 JSON 字符串解析为 JsonNode 并添加到数组
-                JsonNode itemNode = mapper.readTree(itemJson);
-                root.add(itemNode);
-                this.activeContext = mapper.writeValueAsString(root);
-            } catch (Exception e) {
-                // 简单吞掉或打印，实体内部不宜抛出复杂异常，或者抛出 RuntimeException
-                throw new RuntimeException("Failed to append context", e);
+        public void setActiveContextFromBytes(byte[] rolloutBytes) {
+            if (rolloutBytes == null || rolloutBytes.length == 0) {
+                this.activeContext = null;
+            } else {
+                this.activeContext = Base64.getEncoder().encodeToString(rolloutBytes);
             }
+        }
+
+        /**
+         * 检查是否有活跃上下文
+         *
+         * @return 如果有有效的活跃上下文则返回 true
+         */
+        public boolean hasActiveContext() {
+            return this.activeContext != null && !this.activeContext.isEmpty();
         }
 
             /**

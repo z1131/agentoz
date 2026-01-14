@@ -7,6 +7,15 @@ import java.util.List;
 
 /**
  * 任务执行响应 (流式帧)
+ *
+ * <h3>🔄 新版设计（对齐 adapter.proto）</h3>
+ * <p>Codex Adapter 使用事件驱动模式返回响应：</p>
+ * <ul>
+ *   <li>codex_event_json - 原始 Codex 事件（解析后填充到各字段）</li>
+ *   <li>adapter_log - 系统日志（调试用）</li>
+ *   <li>error - 错误信息</li>
+ *   <li>updated_rollout - 最终会话状态（字节数据）</li>
+ * </ul>
  */
 @Data
 public class TaskResponse implements Serializable {
@@ -47,6 +56,14 @@ public class TaskResponse implements Serializable {
      * 错误信息
      */
     private String errorMessage;
+
+    /**
+     * 更新后的会话状态数据（JSONL 格式字节数组）
+     *
+     * <p>⚠️ 核心字段：这是 Agent 下次请求时需要传回的 history_rollout</p>
+     * <p>仅在 FINISHED 状态下有值，调用方应将此数据保存到 Agent 的 activeContext</p>
+     */
+    private byte[] updatedRollout;
 
     public static class Usage implements Serializable {
         public long promptTokens;

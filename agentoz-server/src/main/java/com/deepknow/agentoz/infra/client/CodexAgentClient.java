@@ -1,28 +1,26 @@
 package com.deepknow.agentoz.infra.client;
 
 import codex.agent.*;
-import com.deepknow.agentoz.infra.converter.grpc.ConfigProtoConverter;
-import com.deepknow.agentoz.model.AgentConfigEntity;
 import org.apache.dubbo.common.stream.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
-
 /**
- * Codex Agent 客户端
- * 负责与 codex-agent (Rust) 服务进行通信 (via Dubbo Triple Protocol)
+ * Codex Agent 客户端（对齐 adapter.proto）
  *
- * <p>通过 {@link } 接口,使用 Dubbo Triple 协议调用外部 Rust gRPC 服务。</p>
+ * <p>负责与 codex-agent (Rust Adapter) 服务进行通信 (via Dubbo Triple Protocol)</p>
  *
- * <h3> 核心方法</h3>
+ * <h3>🔄 新版协议变化</h3>
  * <ul>
- *   <li>{@link #runTask(String, AgentConfigEntity, List, String, StreamObserver)} - 执行Agent任务（流式返回）</li>
+ *   <li>请求：使用 history_rollout (bytes) 传递会话状态</li>
+ *   <li>响应：事件驱动模式（oneof event）</li>
+ *   <li>结束标志：updated_rollout 事件包含最新会话状态</li>
  * </ul>
  *
- * @see
- * @see AgentConfigEntity
+ * @see codex.agent.AgentService
+ * @see codex.agent.RunTaskRequest
+ * @see codex.agent.RunTaskResponse
  */
 @Slf4j
 @Component
@@ -41,21 +39,32 @@ public class CodexAgentClient {
     /**
      * 执行代理任务 (流式返回)
      *
-     * @param conversationId 会话ID
+     * <p>调用 Codex Adapter 的 RunTask RPC，返回事件流：</p>
+     * <ul>
+     *   <li>codex_event_json - 原始 Codex 事件</li>
+     *   <li>adapter_log - 系统日志</li>
+     *   <li>error - 错误信息</li>
+     *   <li>updated_rollout - 最终会话状态</li>
+     * </ul>
+     *
+     * @param sessionId 会话ID（用于日志追踪）
      * @param request 预先构建好的请求对象
      * @param responseObserver 响应流观察者
      */
     public void runTask(
-            String conversationId,
+            String sessionId,
             RunTaskRequest request,
             StreamObserver<RunTaskResponse> responseObserver
     ) {
-        log.info("发起 Codex-Agent 调用: conversationId={}", conversationId);
+        log.info("发起 Codex-Agent 调用: sessionId={}, requestId={}, historySize={} bytes",
+                sessionId,
+                request.getRequestId(),
+                request.getHistoryRollout().size());
 
         try {
             agentRpcService.runTask(request, responseObserver);
         } catch (Exception e) {
-            log.error("Codex-Agent 调用异常: conversationId={}", conversationId, e);
+            log.error("Codex-Agent 调用异常: sessionId={}", sessionId, e);
             responseObserver.onError(e);
         }
     }

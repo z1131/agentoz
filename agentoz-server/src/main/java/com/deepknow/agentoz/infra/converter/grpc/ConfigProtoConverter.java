@@ -1,24 +1,32 @@
 package com.deepknow.agentoz.infra.converter.grpc;
 
-import com.deepknow.agentoz.dto.config.ModelOverridesVO;
-import com.deepknow.agentoz.dto.config.ProviderConfigVO;
-import com.deepknow.agentoz.dto.config.SessionSourceVO;
+import com.deepknow.agentoz.dto.config.ModelProviderInfoVO;
 import codex.agent.*;
 import com.deepknow.agentoz.model.AgentConfigEntity;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Iterator;
+import java.util.Map;
+
 /**
- * 实体到Proto的转换器
+ * 实体到 Proto 的转换器（对齐 adapter.proto）
  *
- * <p>负责将AgentOZ的实体类转换为Codex-Agent的Proto强类型定义。</p>
+ * <p>负责将 AgentOZ 的实体类转换为 Codex Adapter 的 Proto 强类型定义。</p>
  *
- * <h3>🔄 转换映射</h3>
+ * <h3>🔄 转换映射 (adapter.proto)</h3>
  * <pre>
- * AgentConfigEntity          →  SessionConfig (Proto)
- *   ├─ provider              →    ProviderConfig
- *   ├─ approvalPolicy (String) → ApprovalPolicy (Enum)
- *   ├─ reasoningEffort (String) → ReasoningEffort (Enum)
- *   └─ mcpConfigJson (JSON)   →    mcp_config_json (string)
+ * AgentConfigEntity              →  SessionConfig (Proto)
+ *   ├─ llmModel                  →    string model
+ *   ├─ modelProvider             →    string model_provider
+ *   ├─ providerInfo              →    ModelProviderInfo provider_info
+ *   ├─ userInstructions          →    string instructions
+ *   ├─ developerInstructions     →    string developer_instructions
+ *   ├─ approvalPolicy (String)   →    ApprovalPolicy (Enum)
+ *   ├─ sandboxPolicy (String)    →    SandboxPolicy (Enum)
+ *   ├─ cwd                       →    string cwd
+ *   └─ mcpConfigJson (JSON)      →    map&lt;string, McpServerDef&gt; mcp_servers
  * </pre>
  *
  * @see AgentConfigEntity
@@ -27,11 +35,13 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ConfigProtoConverter {
 
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
     /**
-     * 将AgentConfigEntity转换为SessionConfig (Proto)
+     * 将 AgentConfigEntity 转换为 SessionConfig (Proto)
      *
-     * @param entity Agent配置实体
-     * @return SessionConfig Proto实例
+     * @param entity Agent 配置实体
+     * @return SessionConfig Proto 实例
      */
     public static SessionConfig toSessionConfig(AgentConfigEntity entity) {
         if (entity == null) {
@@ -41,18 +51,26 @@ public class ConfigProtoConverter {
 
         SessionConfig.Builder builder = SessionConfig.newBuilder();
 
-        // 1. 基础环境配置
-        if (entity.getProvider() != null) {
-            builder.setProvider(toProviderConfig(entity.getProvider()));
-        }
+        // 1. 模型配置
         if (entity.getLlmModel() != null) {
             builder.setModel(entity.getLlmModel());
         }
-        if (entity.getCwd() != null) {
-            builder.setCwd(entity.getCwd());
+        if (entity.getModelProvider() != null) {
+            builder.setModelProvider(entity.getModelProvider());
+        }
+        if (entity.getProviderInfo() != null) {
+            builder.setProviderInfo(toModelProviderInfo(entity.getProviderInfo()));
         }
 
-        // 2. 策略配置 (枚举转换)
+        // 2. 指令配置
+        if (entity.getUserInstructions() != null) {
+            builder.setInstructions(entity.getUserInstructions());
+        }
+        if (entity.getDeveloperInstructions() != null) {
+            builder.setDeveloperInstructions(entity.getDeveloperInstructions());
+        }
+
+        // 3. 策略配置 (枚举转换)
         if (entity.getApprovalPolicy() != null) {
             builder.setApprovalPolicy(parseApprovalPolicy(entity.getApprovalPolicy()));
         }
@@ -60,210 +78,213 @@ public class ConfigProtoConverter {
             builder.setSandboxPolicy(parseSandboxPolicy(entity.getSandboxPolicy()));
         }
 
-        // 3. 指令配置
-        if (entity.getDeveloperInstructions() != null) {
-            builder.setDeveloperInstructions(entity.getDeveloperInstructions());
-        }
-        if (entity.getUserInstructions() != null) {
-            builder.setUserInstructions(entity.getUserInstructions());
-        }
-        if (entity.getBaseInstructions() != null) {
-            builder.setBaseInstructions(entity.getBaseInstructions());
+        // 4. 工作目录
+        if (entity.getCwd() != null) {
+            builder.setCwd(entity.getCwd());
         }
 
-        // 4. 推理配置 (枚举转换)
-        if (entity.getReasoningEffort() != null) {
-            builder.setModelReasoningEffort(parseReasoningEffort(entity.getReasoningEffort()));
-        }
-        if (entity.getReasoningSummary() != null) {
-            builder.setModelReasoningSummary(parseReasoningSummary(entity.getReasoningSummary()));
-        }
-
-        // 5. 提示词优化
-        if (entity.getCompactPrompt() != null) {
-            builder.setCompactPrompt(entity.getCompactPrompt());
-        }
-
-        // 6. 模型能力覆盖
-        if (entity.getModelOverrides() != null) {
-            builder.setModelOverrides(toModelOverrides(entity.getModelOverrides()));
-        }
-
-        // 7. MCP服务器配置 (直接传递 JSON 字符串)
+        // 5. MCP 服务器配置 (JSON → map<string, McpServerDef>)
         if (entity.getMcpConfigJson() != null && !entity.getMcpConfigJson().isEmpty()) {
-            builder.setMcpConfigJson(entity.getMcpConfigJson());
-            log.info("设置MCP配置JSON: length={}, content={}",
-                    entity.getMcpConfigJson().length(),
-                    entity.getMcpConfigJson());
-        } else {
-            log.warn("MCP配置JSON为空或null! entity.mcpConfigJson={}", entity.getMcpConfigJson());
-        }
-
-        // 8. 会话来源
-        if (entity.getSessionSource() != null) {
-            builder.setSessionSource(toSessionSource(entity.getSessionSource()));
+            try {
+                parseMcpServers(entity.getMcpConfigJson(), builder);
+                log.info("解析 MCP 配置成功: length={}", entity.getMcpConfigJson().length());
+            } catch (Exception e) {
+                log.error("解析 MCP 配置失败: {}", e.getMessage(), e);
+            }
         }
 
         SessionConfig config = builder.build();
-        log.debug("AgentConfigEntity 转换为 SessionConfig: model={}, approvalPolicy={}",
-                config.getModel(), config.getApprovalPolicy());
+        log.debug("AgentConfigEntity 转换为 SessionConfig: model={}, provider={}, approvalPolicy={}",
+                config.getModel(), config.getModelProvider(), config.getApprovalPolicy());
 
         return config;
     }
 
     /**
-     * 转换ProviderConfig
+     * 转换 ModelProviderInfo
      */
-    private static ProviderConfig toProviderConfig(ProviderConfigVO apiProvider) {
-        if (apiProvider == null) {
-            return ProviderConfig.getDefaultInstance();
+    private static ModelProviderInfo toModelProviderInfo(ModelProviderInfoVO vo) {
+        if (vo == null) {
+            return ModelProviderInfo.getDefaultInstance();
         }
 
-        ProviderConfig.Builder builder = ProviderConfig.newBuilder()
-                .setName(apiProvider.getName());
+        ModelProviderInfo.Builder builder = ModelProviderInfo.newBuilder();
 
-        if (apiProvider.getBaseUrl() != null) {
-            builder.setBaseUrl(apiProvider.getBaseUrl());
+        if (vo.getName() != null) {
+            builder.setName(vo.getName());
         }
-        if (apiProvider.getApiKey() != null) {
-            builder.setApiKey(apiProvider.getApiKey());
+        if (vo.getBaseUrl() != null) {
+            builder.setBaseUrl(vo.getBaseUrl());
         }
-        if (apiProvider.getWireApi() != null) {
-            builder.setWireApi(apiProvider.getWireApi());
+        if (vo.getEnvKey() != null) {
+            builder.setEnvKey(vo.getEnvKey());
+        }
+        if (vo.getExperimentalBearerToken() != null) {
+            builder.setExperimentalBearerToken(vo.getExperimentalBearerToken());
+        }
+        if (vo.getWireApi() != null) {
+            builder.setWireApi(parseWireApi(vo.getWireApi()));
+        }
+        if (vo.getHttpHeaders() != null) {
+            builder.putAllHttpHeaders(vo.getHttpHeaders());
+        }
+        if (vo.getQueryParams() != null) {
+            builder.putAllQueryParams(vo.getQueryParams());
+        }
+        if (vo.getRequiresOpenaiAuth() != null) {
+            builder.setRequiresOpenaiAuth(vo.getRequiresOpenaiAuth());
         }
 
         return builder.build();
     }
 
     /**
-     * 转换ModelOverrides
+     * 解析 MCP 服务器配置 JSON 并填充到 builder
+     *
+     * <p>支持的 JSON 格式：</p>
+     * <pre>
+     * {
+     *   "server_name": {
+     *     "server_type": "stdio" | "streamable_http",
+     *     "command": "...",
+     *     "args": ["..."],
+     *     "env": {},
+     *     "url": "..."
+     *   }
+     * }
+     * </pre>
      */
-    private static ModelOverrides toModelOverrides(ModelOverridesVO apiModelOverrides) {
-        if (apiModelOverrides == null) {
-            return ModelOverrides.getDefaultInstance();
+    private static void parseMcpServers(String mcpJson, SessionConfig.Builder builder) throws Exception {
+        JsonNode root = objectMapper.readTree(mcpJson);
+
+        // 如果 JSON 包含 "mcp_servers" 字段，则使用该字段
+        JsonNode serversNode = root.has("mcp_servers") ? root.get("mcp_servers") : root;
+
+        if (!serversNode.isObject()) {
+            log.warn("MCP 配置不是有效的 JSON 对象");
+            return;
         }
 
-        ModelOverrides.Builder builder = ModelOverrides.newBuilder();
+        Iterator<Map.Entry<String, JsonNode>> fields = serversNode.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            String serverName = entry.getKey();
+            JsonNode serverConfig = entry.getValue();
 
-        if (apiModelOverrides.getShellType() != null) {
-            builder.setShellType(apiModelOverrides.getShellType());
-        }
-        if (apiModelOverrides.getSupportsParallelToolCalls() != null) {
-            builder.setSupportsParallelToolCalls(apiModelOverrides.getSupportsParallelToolCalls());
-        }
-        if (apiModelOverrides.getApplyPatchToolType() != null) {
-            builder.setApplyPatchToolType(apiModelOverrides.getApplyPatchToolType());
-        }
-        if (apiModelOverrides.getContextWindow() != null) {
-            builder.setContextWindow(apiModelOverrides.getContextWindow());
-        }
-        if (apiModelOverrides.getAutoCompactTokenLimit() != null) {
-            builder.setAutoCompactTokenLimit(apiModelOverrides.getAutoCompactTokenLimit());
-        }
+            McpServerDef.Builder defBuilder = McpServerDef.newBuilder();
 
-        return builder.build();
+            // server_type
+            if (serverConfig.has("server_type")) {
+                defBuilder.setServerType(serverConfig.get("server_type").asText());
+            } else if (serverConfig.has("type")) {
+                // 兼容旧格式
+                defBuilder.setServerType(serverConfig.get("type").asText());
+            }
+
+            // command (stdio 模式)
+            if (serverConfig.has("command")) {
+                defBuilder.setCommand(serverConfig.get("command").asText());
+            }
+
+            // args (stdio 模式)
+            if (serverConfig.has("args") && serverConfig.get("args").isArray()) {
+                for (JsonNode arg : serverConfig.get("args")) {
+                    defBuilder.addArgs(arg.asText());
+                }
+            }
+
+            // env (stdio 模式)
+            if (serverConfig.has("env") && serverConfig.get("env").isObject()) {
+                Iterator<Map.Entry<String, JsonNode>> envFields = serverConfig.get("env").fields();
+                while (envFields.hasNext()) {
+                    Map.Entry<String, JsonNode> envEntry = envFields.next();
+                    defBuilder.putEnv(envEntry.getKey(), envEntry.getValue().asText());
+                }
+            }
+
+            // url (streamable_http 模式)
+            if (serverConfig.has("url")) {
+                defBuilder.setUrl(serverConfig.get("url").asText());
+            }
+
+            builder.putMcpServers(serverName, defBuilder.build());
+            log.debug("解析 MCP 服务器: name={}, type={}", serverName, defBuilder.getServerType());
+        }
     }
+
+    // ============================================================
+    // 枚举转换方法 (对齐 adapter.proto)
+    // ============================================================
 
     /**
-     * 转换SessionSource
+     * 解析 WireApi 类型
      */
-    private static SessionSource toSessionSource(SessionSourceVO apiSessionSource) {
-        if (apiSessionSource == null) {
-            return SessionSource.getDefaultInstance();
+    private static WireApi parseWireApi(String wireApi) {
+        if (wireApi == null || wireApi.isEmpty()) {
+            return WireApi.WIRE_API_CHAT;
         }
 
-        SessionSource.Builder builder = SessionSource.newBuilder()
-                .setSourceType(apiSessionSource.getSourceType());
-
-        if (apiSessionSource.getIntegrationName() != null) {
-            builder.setIntegrationName(apiSessionSource.getIntegrationName());
-        }
-        if (apiSessionSource.getIntegrationVersion() != null) {
-            builder.setIntegrationVersion(apiSessionSource.getIntegrationVersion());
-        }
-
-        return builder.build();
+        return switch (wireApi.toLowerCase()) {
+            case "chat" -> WireApi.WIRE_API_CHAT;
+            case "responses" -> WireApi.WIRE_API_RESPONSES;
+            case "responses_websocket" -> WireApi.WIRE_API_RESPONSES_WEBSOCKET;
+            default -> {
+                log.warn("未知的 WireApi 类型: {}, 使用默认值 WIRE_API_CHAT", wireApi);
+                yield WireApi.WIRE_API_CHAT;
+            }
+        };
     }
-
-    // ============================================================
-    // 枚举转换方法
-    // ============================================================
 
     /**
      * 解析审批策略 (String → Enum)
+     *
+     * <p>adapter.proto 枚举值：</p>
+     * <ul>
+     *   <li>APPROVAL_POLICY_UNSPECIFIED (0)</li>
+     *   <li>ALWAYS (1) - 总是需要审批</li>
+     *   <li>NEVER (2) - 从不需要审批</li>
+     *   <li>UNLESS_TRUSTED (3) - 除非受信任</li>
+     * </ul>
      */
     private static ApprovalPolicy parseApprovalPolicy(String policy) {
         if (policy == null || policy.isEmpty()) {
-            return ApprovalPolicy.AUTO_APPROVE;
+            return ApprovalPolicy.NEVER; // 默认自动执行
         }
 
         return switch (policy.toUpperCase()) {
-            case "AUTO_APPROVE", "AUTO" -> ApprovalPolicy.AUTO_APPROVE;
-            case "MANUAL_APPROVE", "MANUAL" -> ApprovalPolicy.MANUAL_APPROVE;
-            case "BLOCK_ALL", "BLOCKED" -> ApprovalPolicy.BLOCK_ALL;
+            case "ALWAYS", "MANUAL_APPROVE", "MANUAL" -> ApprovalPolicy.ALWAYS;
+            case "NEVER", "AUTO_APPROVE", "AUTO" -> ApprovalPolicy.NEVER;
+            case "UNLESS_TRUSTED" -> ApprovalPolicy.UNLESS_TRUSTED;
             default -> {
-                log.warn("未知的审批策略: {}, 使用默认值 AUTO_APPROVE", policy);
-                yield ApprovalPolicy.AUTO_APPROVE;
+                log.warn("未知的审批策略: {}, 使用默认值 NEVER", policy);
+                yield ApprovalPolicy.NEVER;
             }
         };
     }
 
     /**
      * 解析沙箱策略 (String → Enum)
+     *
+     * <p>adapter.proto 枚举值：</p>
+     * <ul>
+     *   <li>SANDBOX_POLICY_UNSPECIFIED (0)</li>
+     *   <li>WORKSPACE_WRITE (1) - 仅允许写入工作区</li>
+     *   <li>READ_ONLY (2) - 只读模式</li>
+     *   <li>DANGER_FULL_ACCESS (3) - 完全访问权限</li>
+     * </ul>
      */
     private static SandboxPolicy parseSandboxPolicy(String policy) {
         if (policy == null || policy.isEmpty()) {
-            return SandboxPolicy.SANDBOXED;
+            return SandboxPolicy.WORKSPACE_WRITE;
         }
 
         return switch (policy.toUpperCase()) {
             case "READ_ONLY" -> SandboxPolicy.READ_ONLY;
-            case "SANDBOXED", "SANDBOX" -> SandboxPolicy.SANDBOXED;
-            case "INSECURE" -> SandboxPolicy.INSECURE;
+            case "WORKSPACE_WRITE", "SANDBOXED", "SANDBOX" -> SandboxPolicy.WORKSPACE_WRITE;
+            case "DANGER_FULL_ACCESS", "INSECURE", "FULL_ACCESS" -> SandboxPolicy.DANGER_FULL_ACCESS;
             default -> {
-                log.warn("未知的沙箱策略: {}, 使用默认值 SANDBOXED", policy);
-                yield SandboxPolicy.SANDBOXED;
-            }
-        };
-    }
-
-    /**
-     * 解析推理强度 (String → Enum)
-     */
-    private static ReasoningEffort parseReasoningEffort(String effort) {
-        if (effort == null || effort.isEmpty()) {
-            return ReasoningEffort.REASONING_NONE;
-        }
-
-        return switch (effort.toUpperCase()) {
-            case "REASONING_NONE", "NONE" -> ReasoningEffort.REASONING_NONE;
-            case "MINIMAL" -> ReasoningEffort.MINIMAL;
-            case "LOW" -> ReasoningEffort.LOW;
-            case "MEDIUM" -> ReasoningEffort.MEDIUM;
-            case "HIGH" -> ReasoningEffort.HIGH;
-            default -> {
-                log.warn("未知的推理强度: {}, 使用默认值 REASONING_NONE", effort);
-                yield ReasoningEffort.REASONING_NONE;
-            }
-        };
-    }
-
-    /**
-     * 解析推理摘要模式 (String → Enum)
-     */
-    private static ReasoningSummary parseReasoningSummary(String summary) {
-        if (summary == null || summary.isEmpty()) {
-            return ReasoningSummary.AUTO;
-        }
-
-        return switch (summary.toUpperCase()) {
-            case "AUTO" -> ReasoningSummary.AUTO;
-            case "CONCISE" -> ReasoningSummary.CONCISE;
-            case "DETAILED" -> ReasoningSummary.DETAILED;
-            case "REASONING_SUMMARY_NONE", "NONE" -> ReasoningSummary.REASONING_SUMMARY_NONE;
-            default -> {
-                log.warn("未知的推理摘要模式: {}, 使用默认值 AUTO", summary);
-                yield ReasoningSummary.AUTO;
+                log.warn("未知的沙箱策略: {}, 使用默认值 WORKSPACE_WRITE", policy);
+                yield SandboxPolicy.WORKSPACE_WRITE;
             }
         };
     }

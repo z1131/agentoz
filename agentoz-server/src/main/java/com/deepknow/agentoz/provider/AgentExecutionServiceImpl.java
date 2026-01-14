@@ -18,27 +18,32 @@ import com.deepknow.agentoz.infra.util.JwtUtils;
 import com.deepknow.agentoz.infra.history.AgentContextManager;
 import com.deepknow.agentoz.infra.repo.ConversationRepository;
 import codex.agent.RunTaskRequest;
-import codex.agent.UserInput;
 import codex.agent.RunTaskResponse;
 import com.deepknow.agentoz.model.AgentConfigEntity;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.model.ConversationEntity;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.protobuf.ByteString;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.common.stream.StreamObserver;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.UUID;
 
 /**
  * Agent 执行服务实现 (数据面)
+ *
+ * <h3>🔄 新版设计（对齐 Codex Adapter）</h3>
+ * <ul>
+ *   <li>使用 history_rollout (bytes) 传递会话状态，而非 JSON 数组</li>
+ *   <li>接收 updated_rollout (bytes) 更新 Agent 的 activeContext</li>
+ *   <li>解析 codex_event_json 事件以实现流式输出</li>
+ * </ul>
  */
 @Slf4j
 @DubboService(protocol = "tri", timeout = 300000)
@@ -78,6 +83,7 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
 
             log.info("收到任务请求: {}, Role={}", traceInfo, role);
 
+            // 路由到目标 Agent
             if (agentId == null || agentId.isEmpty()) {
                 if (conversationId == null || conversationId.isEmpty()) {
                     throw new AgentOzException(AgentOzErrorCode.INVALID_PARAM, "agentId 和 conversationId 不能同时为空");
@@ -112,16 +118,16 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 throw new AgentOzException(AgentOzErrorCode.CONFIG_NOT_FOUND, agent.getConfigId());
             }
 
-            // 步骤 1: 追加用户消息到 ConversationEntity.historyContext
+            // 步骤 1: 追加用户消息到 ConversationEntity.historyContext（用于业务展示）
             appendMessageToConversationHistory(conversationId, "user", userMessage,
                 request.getSenderName() != null ? request.getSenderName() : "user");
 
-            // 步骤 2: 记录当前 Agent 被调用状态 (优先使用 SenderName 作为 Role 标识，用于状态描述)
+            // 步骤 2: 记录当前 Agent 被调用状态
             String contextRole = (request.getSenderName() != null) ? request.getSenderName() : request.getRole();
             if (contextRole == null) contextRole = "user";
             agentContextManager.onAgentCalled(finalAgentId, userMessage, contextRole);
 
-            // 动态注入系统级 MCP
+            // 步骤 3: 动态注入系统级 MCP
             try {
                 String originalMcpJson = config.getMcpConfigJson();
                 String injectedMcpJson = injectSystemMcp(originalMcpJson, agent.getAgentId(), agent.getConversationId());
@@ -130,51 +136,70 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 log.error("注入系统MCP失败", e);
             }
 
-            // 步骤 3: 提取历史记录 (透传模式：直接提取 JSON 数组中的每一项)
-            List<String> historyJsonList = extractHistoryJsonList(agent.getActiveContext());
+            // 步骤 4: 获取 Agent 的历史会话状态（JSONL bytes）
+            byte[] historyRollout = agent.getActiveContextBytes();
+            log.info("准备调用Codex: agentId={}, model={}, historySize={} bytes",
+                    finalAgentId, config.getLlmModel(), historyRollout.length);
 
-            log.info("准备调用Codex: agentId={}, model={}, historySize={}",
-                    finalAgentId, config.getLlmModel(), historyJsonList.size());
-
-            // 步骤 4: 调用 Codex-Agent，并在响应返回时记录历史
+            // 步骤 5: 构建新版 RunTaskRequest（对齐 adapter.proto）
             RunTaskRequest requestParams = RunTaskRequest.newBuilder()
-                    .setConversationId(agent.getConversationId())
-                    .setConfig(ConfigProtoConverter.toSessionConfig(config))
-                    .addAllHistoryJson(historyJsonList) // 使用透传的 JSON 列表
-                    .setInput(UserInput.newBuilder().setText(userMessage).build())
+                    .setRequestId(UUID.randomUUID().toString())
+                    .setSessionId(agent.getConversationId())  // session_id = conversation_id
+                    .setPrompt(userMessage)                    // prompt 替代旧的 input.text
+                    .setSessionConfig(ConfigProtoConverter.toSessionConfig(config))
+                    .setHistoryRollout(ByteString.copyFrom(historyRollout))  // bytes 替代 repeated string
                     .build();
+
+            // 步骤 6: 调用 Codex-Agent，处理事件驱动的响应流
+            final StringBuilder fullResponseBuilder = new StringBuilder();
 
             codexAgentClient.runTask(
                     agent.getConversationId(),
                     requestParams,
                     StreamGuard.wrapObserver(responseObserver, (RunTaskResponse proto) -> {
-                        // 每次收到响应时
+                        // 转换响应
                         TaskResponse dto = TaskResponseProtoConverter.toTaskResponse(proto);
 
-                        // 记录 Assistant 响应到会话历史 (使用 Agent 的真实名称)
-                        if (dto.getFinalResponse() != null && !dto.getFinalResponse().isEmpty()) {
-                            appendMessageToConversationHistory(conversationId, "assistant",
-                                dto.getFinalResponse(), agent.getAgentName());
+                        // 收集完整响应内容
+                        if (dto.getTextDelta() != null) {
+                            fullResponseBuilder.append(dto.getTextDelta());
+                        }
+                        if (dto.getFinalResponse() != null) {
+                            fullResponseBuilder.setLength(0);
+                            fullResponseBuilder.append(dto.getFinalResponse());
                         }
 
-                        // 核心：将 Codex 返回的新 Item (JSON) 直接追加到 Agent 的 activeContext
-                        if (proto.getNewItemsJsonCount() > 0) {
-                            for (String itemJson : proto.getNewItemsJsonList()) {
-                                agent.appendContext(itemJson, objectMapper);
+                        // 核心：处理 updated_rollout（流结束标志）
+                        if (dto.getUpdatedRollout() != null && dto.getUpdatedRollout().length > 0) {
+                            // 更新 Agent 的 activeContext
+                            agent.setActiveContextFromBytes(dto.getUpdatedRollout());
+
+                            // 记录 Assistant 响应到会话历史（用于业务展示）
+                            String finalResponse = fullResponseBuilder.toString();
+                            if (!finalResponse.isEmpty()) {
+                                appendMessageToConversationHistory(conversationId, "assistant",
+                                        finalResponse, agent.getAgentName());
+                                agent.updateOutputState(finalResponse);
                             }
-                            // 异步更新 Agent 状态描述 (仅输出时)
-                            if (dto.getFinalResponse() != null && !dto.getFinalResponse().isEmpty()) {
-                                agent.updateOutputState(dto.getFinalResponse());
-                            }
+
+                            // 持久化 Agent 状态
                             agentRepository.updateById(agent);
+                            log.info("Agent 状态已更新: agentId={}, rolloutSize={} bytes",
+                                    finalAgentId, dto.getUpdatedRollout().length);
                         }
 
+                        // 转发响应给调用方
                         responseObserver.onNext(dto);
                     }, traceInfo)
             );
         }, traceInfo);
     }
 
+    /**
+     * 注入系统级 MCP 配置
+     *
+     * <p>添加 agentoz_system MCP 服务器，用于 Agent 间协作</p>
+     */
     private String injectSystemMcp(String originalJson, String agentId, String conversationId) {
         try {
             ObjectNode rootNode;
@@ -184,21 +209,18 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 JsonNode node = objectMapper.readTree(originalJson);
                 rootNode = node.isObject() ? (ObjectNode) node : objectMapper.createObjectNode();
             }
-            
-            ObjectNode serversNode = rootNode.has("mcp_servers") ? (ObjectNode) rootNode.get("mcp_servers") : rootNode.putObject("mcp_servers");
+
             String token = jwtUtils.generateToken(agentId, conversationId);
-            
-            // 构建 System MCP 配置
+
+            // 构建 System MCP 配置（对齐 adapter.proto 的 McpServerDef）
             ObjectNode sysMcpConfig = objectMapper.createObjectNode();
-            // 适配 Codex 偏好的 streamable_http 模式
-            sysMcpConfig.put("type", "streamable_http");
-            // 使用新的 MCP SDK Server 端点（基于官方 MCP Java SDK）
-            sysMcpConfig.put("url", "https://agentoz.deepknow.online/mcp");
-            
-            ObjectNode httpHeaders = sysMcpConfig.putObject("http_headers");
-            httpHeaders.put("Authorization", "Bearer " + token);
-            
-            serversNode.set("agentoz_system", sysMcpConfig);
+            sysMcpConfig.put("server_type", "streamable_http");
+            sysMcpConfig.put("url", websiteUrl + "/mcp");
+
+            // 注意：http_headers 在 adapter.proto 中是 ModelProviderInfo 的字段
+            // MCP 配置中通常通过其他方式传递认证信息
+
+            rootNode.set("agentoz_system", sysMcpConfig);
             return objectMapper.writeValueAsString(rootNode);
         } catch (Exception e) {
             log.error("Failed to inject system MCP", e);
@@ -218,6 +240,8 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
     /**
      * 追加消息到会话历史 (JSON格式)
      *
+     * <p>⚠️ 这是用于业务展示的全量历史，不参与 Codex 计算</p>
+     *
      * @param conversationId 会话ID
      * @param role 角色 (user/assistant)
      * @param content 消息内容
@@ -225,7 +249,6 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
      */
     private void appendMessageToConversationHistory(String conversationId, String role, String content, String senderName) {
         try {
-            // 查询会话
             ConversationEntity conversation = conversationRepository.selectOne(
                     new LambdaQueryWrapper<ConversationEntity>()
                             .eq(ConversationEntity::getConversationId, conversationId)
@@ -236,19 +259,18 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 return;
             }
 
-            // 构造 ResponseItem 格式的 JSON (符合 Codex 定义)
-            ObjectNode responseItem = objectMapper.createObjectNode();
-            responseItem.put("type", "message");
-            responseItem.put("role", role);
+            // 构造展示用的消息格式
+            ObjectNode messageItem = objectMapper.createObjectNode();
+            messageItem.put("type", "message");
+            messageItem.put("role", role);
+            messageItem.put("sender", senderName);
+            messageItem.put("timestamp", LocalDateTime.now().toString());
 
             // 构造 content 数组
             ObjectNode contentItem = objectMapper.createObjectNode();
-            contentItem.put("type", "input_text");  // 用户输入用 input_text
-            if ("assistant".equals(role)) {
-                contentItem.put("type", "output_text");  // assistant 响应用 output_text
-            }
+            contentItem.put("type", "assistant".equals(role) ? "output_text" : "input_text");
             contentItem.put("text", content);
-            responseItem.set("content", objectMapper.createArrayNode().add(contentItem));
+            messageItem.set("content", objectMapper.createArrayNode().add(contentItem));
 
             // 追加到 historyContext
             String currentHistory = conversation.getHistoryContext();
@@ -258,7 +280,7 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
 
             JsonNode historyNode = objectMapper.readTree(currentHistory);
             if (historyNode.isArray()) {
-                ((ArrayNode) historyNode).add(responseItem);
+                ((ArrayNode) historyNode).add(messageItem);
                 conversation.setHistoryContext(objectMapper.writeValueAsString(historyNode));
 
                 // 更新辅助字段
@@ -269,7 +291,6 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
                 Integer count = conversation.getMessageCount();
                 conversation.setMessageCount(count != null ? count + 1 : 1);
 
-                // 更新数据库
                 conversationRepository.updateById(conversation);
             }
         } catch (Exception e) {
@@ -280,31 +301,5 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
     private String truncateText(String text, int maxLength) {
         if (text == null) return null;
         return text.length() <= maxLength ? text : text.substring(0, maxLength) + "...";
-    }
-
-    /**
-     * 辅助方法：将数据库存的 JSON 数组拆分为 String 列表
-     *
-     * <p>因为 activeContext 存储的是 JSON 数组字符串，而 proto 需要的是 repeated string，
-     * 所以需要把数组的每个元素转为单独的 JSON 字符串</p>
-     */
-    private List<String> extractHistoryJsonList(String activeContextJson) {
-        if (activeContextJson == null || activeContextJson.isEmpty() || "null".equals(activeContextJson)) {
-            return List.of();
-        }
-        try {
-            JsonNode node = objectMapper.readTree(activeContextJson);
-            List<String> items = new ArrayList<>();
-            if (node.isArray()) {
-                for (JsonNode item : node) {
-                    // 每个数组元素就是一个 HistoryItem 的 JSON
-                    items.add(item.toString());
-                }
-            }
-            return items;
-        } catch (Exception e) {
-            log.warn("解析上下文 JSON 列表失败: {}", e.getMessage());
-            return List.of();
-        }
     }
 }
