@@ -29,6 +29,7 @@ import java.util.Map;
 public class AgentConfigDTO implements Serializable {
     private static final long serialVersionUID = 1L;
 
+
     // ============================================================
     // 1. 模型配置 - Model Configuration
     // ============================================================
