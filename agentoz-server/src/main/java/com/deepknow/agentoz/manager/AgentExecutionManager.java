@@ -114,12 +114,28 @@ public class AgentExecutionManager {
             log.info("准备调用Codex: agentId={}, model={}, historySize={} bytes",
                     agentId, config.getLlmModel(), historyRollout.length);
 
-            // 7. 构建 Codex 请求
-            RunTaskRequest requestParams = RunTaskRequest.newBuilder()
+                // 7. 构建 Codex 请求
+                SessionConfig sessionConfig = ConfigProtoConverter.toSessionConfig(config);
+
+                // 7.1 关键字段埋点，方便对比云端与本地
+                ModelProviderInfo prov = sessionConfig.hasProviderInfo() ? sessionConfig.getProviderInfo() : null;
+                log.info("[DEBUG] Codex 请求参数校验: model={}, provider={}, wireApi={}, baseUrl={}, approvalPolicy={}, sandboxPolicy={}, instructions={}, developerInstructions={}, promptLen={}, historyBytes={}",
+                    sessionConfig.getModel(),
+                    sessionConfig.getModelProvider(),
+                    (prov != null ? prov.getWireApi().name() : ""),
+                    (prov != null ? prov.getBaseUrl() : ""),
+                    sessionConfig.getApprovalPolicy().name(),
+                    sessionConfig.getSandboxPolicy().name(),
+                    sessionConfig.getInstructions(),
+                    sessionConfig.getDeveloperInstructions(),
+                    (context.userMessage() != null ? context.userMessage().length() : 0),
+                    historyRollout.length);
+
+                RunTaskRequest requestParams = RunTaskRequest.newBuilder()
                     .setRequestId(UUID.randomUUID().toString())
                     .setSessionId(agent.getConversationId())
                     .setPrompt(context.userMessage())
-                    .setSessionConfig(ConfigProtoConverter.toSessionConfig(config))
+                    .setSessionConfig(sessionConfig)
                     .setHistoryRollout(ByteString.copyFrom(historyRollout))
                     .build();
 
