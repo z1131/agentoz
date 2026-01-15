@@ -288,8 +288,19 @@ public class AgentExecutionManager {
             ObjectNode sysMcpConfig = objectMapper.createObjectNode();
             sysMcpConfig.put("server_type", "streamable_http");
             sysMcpConfig.put("url", websiteUrl + "/mcp/message");
+            
+            // HTTP Headers 配置 (用于传递鉴权 Token)
+            ObjectNode headersConfig = objectMapper.createObjectNode();
+            headersConfig.put("Authorization", "Bearer " + token);
+            sysMcpConfig.set("http_headers", headersConfig);
 
-            rootNode.set("agentoz_system", sysMcpConfig);
+            // 修正: 检查是否存在 mcp_servers 嵌套结构，避免注入位置错误导致被解析器忽略
+            if (rootNode.has("mcp_servers") && rootNode.get("mcp_servers").isObject()) {
+                ((ObjectNode) rootNode.get("mcp_servers")).set("agentoz_system", sysMcpConfig);
+            } else {
+                rootNode.set("agentoz_system", sysMcpConfig);
+            }
+            
             config.setMcpConfigJson(objectMapper.writeValueAsString(rootNode));
         } catch (Exception e) {
             log.error("注入系统MCP失败", e);

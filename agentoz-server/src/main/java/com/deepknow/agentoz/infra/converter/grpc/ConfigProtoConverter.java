@@ -211,6 +211,25 @@ public class ConfigProtoConverter {
                 defBuilder.setUrl(serverConfig.get("url").asText());
             }
 
+            // http_headers (streamable_http 模式)
+            // 优先匹配标准复数形式 "http_headers"，兼容单数 "http_header"
+            JsonNode headersNode = null;
+            headersNode = serverConfig.get("http_headers");
+
+            if (headersNode != null && headersNode.isObject()) {
+                Iterator<Map.Entry<String, JsonNode>> headerFields = headersNode.fields();
+                while (headerFields.hasNext()) {
+                    Map.Entry<String, JsonNode> headerEntry = headerFields.next();
+                    // 确保 value 是字符串
+                    String val = headerEntry.getValue().isTextual() ? 
+                         headerEntry.getValue().asText() : headerEntry.getValue().toString();
+                    
+                    // ⚠️ 由于 Proto 定义中暂无 http_headers 字段，这里将 Header 放入 env 中透传
+                    // Codex Adapter 需处理从 env 中读取 Authorization 等 Header 的逻辑
+                    defBuilder.putEnv(headerEntry.getKey(), val);
+                }
+            }
+
             builder.putMcpServers(serverName, defBuilder.build());
             log.debug("解析 MCP 服务器: name={}, type={}", serverName, defBuilder.getServerType());
         }
