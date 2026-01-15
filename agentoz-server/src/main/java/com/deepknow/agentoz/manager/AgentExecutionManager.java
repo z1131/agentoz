@@ -25,6 +25,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.protobuf.ByteString;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.dubbo.common.stream.StreamObserver;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -150,7 +151,7 @@ public class AgentExecutionManager {
             codexAgentClient.runTask(
                     agent.getConversationId(),
                     requestParams,
-                    new org.apache.dubbo.common.stream.StreamObserver<>() {
+                    new StreamObserver<>() {
                         @Override
                         public void onNext(codex.agent.RunTaskResponse proto) {
                             log.info("收到 Codex 响应: eventCase={}", proto.getEventCase());

@@ -15,12 +15,18 @@ import java.util.List;
  * <h3>🎯 职责</h3>
  * <p>将内部事件转换为 API 层 DTO，实现内部协议与对外契约的解耦</p>
  *
- * <h3>📦 转换映射</h3>
+ * <h3>📦 转换策略（优化版）</h3>
  * <ul>
- *   <li>agent_message_delta → textDelta</li>
- *   <li>agent_reasoning_delta → reasoningDelta</li>
- *   <li>agent_message → finalResponse</li>
- *   <li>item_completed → newItemsJson</li>
+ *   <li>✅ 直接透传：将 Codex 原始事件 JSON 直接放入 rawCodexEvents 字段</li>
+ *   <li>⚠️ 保留兼容：为保持向后兼容，仍填充旧字段（标记为 @Deprecated）</li>
+ * </ul>
+ *
+ * <h3>🔄 事件类型映射</h3>
+ * <ul>
+ *   <li>agent_message_delta → rawCodexEvents + textDelta (兼容)</li>
+ *   <li>agent_reasoning_delta → rawCodexEvents + reasoningDelta (兼容)</li>
+ *   <li>agent_message → rawCodexEvents + finalResponse (兼容)</li>
+ *   <li>item_completed → rawCodexEvents + newItemsJson (兼容)</li>
  *   <li>token_count → usage</li>
  *   <li>updated_rollout → updatedRollout</li>
  *   <li>error → errorMessage</li>
@@ -33,6 +39,8 @@ public class TaskResponseConverter {
 
     /**
      * 转换 InternalCodexEvent → TaskResponse
+     *
+     * <p>优化策略：直接透传 Codex 原始事件，同时保留旧字段以兼容现有代码</p>
      */
     public static TaskResponse toTaskResponse(InternalCodexEvent event) {
         if (event == null) {
@@ -53,6 +61,12 @@ public class TaskResponseConverter {
                 dto.setUpdatedRollout(event.getUpdatedRollout());
             }
             case PROCESSING -> {
+                // ✅ 核心：直接透传 Codex 原始事件
+                if (event.getRawEventJson() != null) {
+                    dto.setRawCodexEvents(List.of(event.getRawEventJson()));
+                }
+
+                // ⚠️ 兼容旧代码：继续填充旧字段（逐步废弃）
                 parseEventToResponse(event, dto);
             }
         }
