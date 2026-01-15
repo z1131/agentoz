@@ -21,7 +21,7 @@ import java.util.Map;
  *   ├─ llmModel                  →    string model
  *   ├─ modelProvider             →    string model_provider
  *   ├─ providerInfo              →    ModelProviderInfo provider_info
- *   ├─ userInstructions          →    string instructions
+ *   ├─ baseInstructions          →    string instructions
  *   ├─ developerInstructions     →    string developer_instructions
  *   ├─ approvalPolicy (String)   →    ApprovalPolicy (Enum)
  *   ├─ sandboxPolicy (String)    →    SandboxPolicy (Enum)
@@ -67,8 +67,8 @@ public class ConfigProtoConverter {
         }
 
         // 2. 指令配置
-        if (entity.getUserInstructions() != null) {
-            builder.setInstructions(entity.getUserInstructions());
+        if (entity.getBaseInstructions() != null) {
+            builder.setInstructions(entity.getBaseInstructions());
         }
         if (entity.getDeveloperInstructions() != null) {
             builder.setDeveloperInstructions(entity.getDeveloperInstructions());

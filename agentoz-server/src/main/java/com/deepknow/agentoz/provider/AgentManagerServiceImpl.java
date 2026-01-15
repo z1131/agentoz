@@ -295,9 +295,9 @@ public class AgentManagerServiceImpl implements AgentManagerService {
                 // 策略配置
                 .approvalPolicy(apiConfig.getApprovalPolicy())
                 .sandboxPolicy(apiConfig.getSandboxPolicy())
-                // 指令配置（baseInstructions 已在新版中移除）
+                // 指令配置
                 .developerInstructions(apiConfig.getDeveloperInstructions())
-                .userInstructions(apiConfig.getUserInstructions())
+                .baseInstructions(apiConfig.getBaseInstructions())
                 // MCP配置（保持JSON字符串）
                 .mcpConfigJson(apiConfig.getMcpConfigJson())
                 // 元数据

@@ -19,7 +19,7 @@ import java.util.Map;
  *   ├─ approvalPolicy         →   ApprovalPolicy (ALWAYS/NEVER/UNLESS_TRUSTED)
  *   ├─ sandboxPolicy          →   SandboxPolicy (WORKSPACE_WRITE/READ_ONLY/DANGER_FULL_ACCESS)
  *   ├─ developerInstructions  →   string developer_instructions
- *   ├─ userInstructions       →   string instructions
+ *   ├─ baseInstructions       →   string instructions
  *   └─ mcpConfigJson          →   map&lt;string, McpServerDef&gt; mcp_servers
  * </pre>
  *
@@ -84,11 +84,11 @@ public class AgentConfigDTO implements Serializable {
     private String developerInstructions;
 
     /**
-     * 用户指令
+     * 基础指令
      * 对应 Proto: string instructions
      * 给Agent的业务级指令
      */
-    private String userInstructions;
+    private String baseInstructions;
 
     // ============================================================
     // 4. MCP 配置 - MCP Server Configuration

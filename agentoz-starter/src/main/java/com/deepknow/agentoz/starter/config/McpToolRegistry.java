@@ -65,10 +65,10 @@ public class McpToolRegistry implements ApplicationContextAware {
                     try {
                         // 传入 beanName 而不是实例，实现延迟加载
                         specs.add(buildToolSpec(beanName, method));
-                        log.info("🔨 [MCP] 注册工具: {} -> {}.{}", 
+                        log.info("[MCP] 注册工具: {} -> {}.{}",
                                 getToolName(method), beanType.getSimpleName(), method.getName());
                     } catch (Exception e) {
-                        log.error("❌ [MCP] 注册工具失败: {}.{}", beanType.getSimpleName(), method.getName(), e);
+                        log.error("[MCP] 注册工具失败: {}.{}", beanType.getSimpleName(), method.getName(), e);
                     }
                 }
             });

@@ -38,7 +38,7 @@ import java.time.LocalDateTime;
  *   ├─ string model                 →   ├─ String llmModel
  *   ├─ string model_provider        →   ├─ String modelProvider
  *   ├─ ModelProviderInfo provider_info → ├─ ModelProviderInfoVO providerInfo
- *   ├─ string instructions          →   ├─ String userInstructions
+ *   ├─ string instructions          →   ├─ String baseInstructions
  *   ├─ string developer_instructions→   ├─ String developerInstructions
  *   ├─ ApprovalPolicy               →   ├─ String approvalPolicy
  *   ├─ SandboxPolicy                →   ├─ String sandboxPolicy
@@ -134,11 +134,11 @@ public class AgentConfigEntity {
     private String developerInstructions;
 
     /**
-     * 用户指令
+     * 基础指令
      * 对应 Proto: string instructions
      * 给 Agent 的业务级指令
      */
-    private String userInstructions;
+    private String baseInstructions;
 
     // ============================================================
     // 4. MCP 配置 - MCP Server Configuration
