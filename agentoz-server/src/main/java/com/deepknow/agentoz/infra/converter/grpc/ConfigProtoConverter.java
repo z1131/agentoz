@@ -68,7 +68,7 @@ public class ConfigProtoConverter {
 
         // 2. 指令配置
         if (entity.getBaseInstructions() != null) {
-            builder.setInstructions(entity.getBaseInstructions());
+            builder.setBaseInstructions(entity.getBaseInstructions());
         }
         if (entity.getDeveloperInstructions() != null) {
             builder.setDeveloperInstructions(entity.getDeveloperInstructions());

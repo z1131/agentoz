@@ -126,8 +126,8 @@ public class AgentExecutionManager {
                     sessionConfig.getMcpServersMap().keySet());
 
                 // 7.05 打印提示词配置（调试用）
-                log.info("[DEBUG] 提示词配置: instructions长度={}, developerInstructions长度={}",
-                    sessionConfig.getInstructions() != null ? sessionConfig.getInstructions().length() : 0,
+                log.info("[DEBUG] 提示词配置: baseInstructions长度={}, developerInstructions长度={}",
+                    sessionConfig.getBaseInstructions() != null ? sessionConfig.getBaseInstructions().length() : 0,
                     sessionConfig.getDeveloperInstructions() != null ? sessionConfig.getDeveloperInstructions().length() : 0);
                 if (sessionConfig.getDeveloperInstructions() != null && sessionConfig.getDeveloperInstructions().length() > 0) {
                     log.info("[DEBUG] developerInstructions内容前200字符: {}",
@@ -136,14 +136,14 @@ public class AgentExecutionManager {
 
                 // 7.1 关键字段埋点，方便对比云端与本地
                 ModelProviderInfo prov = sessionConfig.hasProviderInfo() ? sessionConfig.getProviderInfo() : null;
-                log.info("[DEBUG] Codex 请求参数校验: model={}, provider={}, wireApi={}, baseUrl={}, approvalPolicy={}, sandboxPolicy={}, instructions={}, developerInstructions={}, promptLen={}, historyBytes={}",
+                log.info("[DEBUG] Codex 请求参数校验: model={}, provider={}, wireApi={}, baseUrl={}, approvalPolicy={}, sandboxPolicy={}, baseInstructions={}, developerInstructions={}, promptLen={}, historyBytes={}",
                     sessionConfig.getModel(),
                     sessionConfig.getModelProvider(),
                     (prov != null ? prov.getWireApi().name() : ""),
                     (prov != null ? prov.getBaseUrl() : ""),
                     sessionConfig.getApprovalPolicy().name(),
                     sessionConfig.getSandboxPolicy().name(),
-                    sessionConfig.getInstructions(),
+                    sessionConfig.getBaseInstructions(),
                     sessionConfig.getDeveloperInstructions(),
                     (context.userMessage() != null ? context.userMessage().length() : 0),
                     historyRollout.length);

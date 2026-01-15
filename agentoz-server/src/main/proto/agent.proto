@@ -70,8 +70,8 @@ message SessionConfig {
   // 模型提供商详细配置
   ModelProviderInfo provider_info = 3;
 
-  // 用户指令
-  optional string instructions = 4;
+  // 基础指令
+  optional string base_instructions = 4;
 
   // 开发者指令 (最高优先级)
   optional string developer_instructions = 5;
