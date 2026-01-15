@@ -120,6 +120,11 @@ public class AgentExecutionManager {
                 // 7. 构建 Codex 请求
                 SessionConfig sessionConfig = ConfigProtoConverter.toSessionConfig(config);
 
+                // 7.0 打印 MCP 服务器配置（调试用）
+                log.info("[DEBUG] MCP Servers 配置: count={}, servers={}",
+                    sessionConfig.getMcpServersMap().size(),
+                    sessionConfig.getMcpServersMap().keySet());
+
                 // 7.1 关键字段埋点，方便对比云端与本地
                 ModelProviderInfo prov = sessionConfig.hasProviderInfo() ? sessionConfig.getProviderInfo() : null;
                 log.info("[DEBUG] Codex 请求参数校验: model={}, provider={}, wireApi={}, baseUrl={}, approvalPolicy={}, sandboxPolicy={}, instructions={}, developerInstructions={}, promptLen={}, historyBytes={}",
@@ -273,7 +278,7 @@ public class AgentExecutionManager {
 
             ObjectNode sysMcpConfig = objectMapper.createObjectNode();
             sysMcpConfig.put("server_type", "streamable_http");
-            sysMcpConfig.put("url", websiteUrl + "/mcp");
+            sysMcpConfig.put("url", websiteUrl + "/mcp/message");
 
             rootNode.set("agentoz_system", sysMcpConfig);
             config.setMcpConfigJson(objectMapper.writeValueAsString(rootNode));

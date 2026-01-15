@@ -30,7 +30,7 @@ agentoz:
     enabled: true
     server-name: agentoz
     server-version: 1.0.0
-    http-endpoint: /mcp
+    http-endpoint: /mcp/message
 
 # Codex-Agent 配置
 codex:
