@@ -125,6 +125,15 @@ public class AgentExecutionManager {
                     sessionConfig.getMcpServersMap().size(),
                     sessionConfig.getMcpServersMap().keySet());
 
+                // 7.05 打印提示词配置（调试用）
+                log.info("[DEBUG] 提示词配置: instructions长度={}, developerInstructions长度={}",
+                    sessionConfig.getInstructions() != null ? sessionConfig.getInstructions().length() : 0,
+                    sessionConfig.getDeveloperInstructions() != null ? sessionConfig.getDeveloperInstructions().length() : 0);
+                if (sessionConfig.getDeveloperInstructions() != null && sessionConfig.getDeveloperInstructions().length() > 0) {
+                    log.info("[DEBUG] developerInstructions内容前200字符: {}",
+                        sessionConfig.getDeveloperInstructions().substring(0, Math.min(200, sessionConfig.getDeveloperInstructions().length())));
+                }
+
                 // 7.1 关键字段埋点，方便对比云端与本地
                 ModelProviderInfo prov = sessionConfig.hasProviderInfo() ? sessionConfig.getProviderInfo() : null;
                 log.info("[DEBUG] Codex 请求参数校验: model={}, provider={}, wireApi={}, baseUrl={}, approvalPolicy={}, sandboxPolicy={}, instructions={}, developerInstructions={}, promptLen={}, historyBytes={}",
