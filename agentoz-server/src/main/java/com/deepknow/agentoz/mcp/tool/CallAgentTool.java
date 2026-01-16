@@ -4,10 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.deepknow.agentoz.api.dto.ExecuteTaskRequest;
 import com.deepknow.agentoz.api.dto.TaskResponse;
-import com.deepknow.agentoz.api.service.AgentExecutionService;
 import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
+import com.deepknow.agentoz.manager.AgentExecutionManager;
 import com.deepknow.agentoz.manager.SessionStreamRegistry;
+import com.deepknow.agentoz.manager.converter.TaskResponseConverter;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.starter.annotation.AgentParam;
 import com.deepknow.agentoz.starter.annotation.AgentTool;
@@ -30,7 +31,7 @@ import java.util.concurrent.TimeUnit;
 public class CallAgentTool {
 
     @Autowired
-    private AgentExecutionService agentExecutionService;
+    private AgentExecutionManager agentExecutionManager;
 
     @Autowired
     private AgentRepository agentRepository;
@@ -145,77 +146,75 @@ public class CallAgentTool {
                 finalMessage = String.format("%s\n\n[Context]\n%s", task, context);
             }
 
-            // 5. 构建执行请求
-            ExecuteTaskRequest executeRequest = new ExecuteTaskRequest();
-            executeRequest.setAgentId(targetAgentId);
-            executeRequest.setConversationId(conversationId);
-            executeRequest.setMessage(finalMessage);
-            executeRequest.setRole("assistant"); 
-            executeRequest.setSenderName(sourceAgentName);
-
-            // 6. 同步调用 Agent 服务
-            log.info("[CallAgent] → 开始调用 AgentExecutionService, TargetAgentId={}, Message={}",
+            // 5. 构建执行请求上下文
+            log.info("[CallAgent] → 开始本地调用 AgentExecutionManager, TargetAgentId={}, Message={}",
                     targetAgentId, finalMessage);
 
             final String currentConversationId = conversationId;
+            final String finalTargetAgentName = targetAgentName;
 
             CompletableFuture<String> resultFuture = new CompletableFuture<>();
-            StreamObserver<TaskResponse> responseObserver = new StreamObserver<TaskResponse>() {
-                private final StringBuilder fullResponse = new StringBuilder();
-                private int messageCount = 0;
+            final StringBuilder fullResponse = new StringBuilder();
 
-                @Override
-                public void onNext(TaskResponse response) {
-                    messageCount++;
-                    if (response == null) return;
+            // 6. 本地异步调用执行管理器 (不走 Dubbo RPC)
+            AgentExecutionManager.ExecutionContext executionContext = new AgentExecutionManager.ExecutionContext(
+                    targetAgentId,
+                    conversationId,
+                    finalMessage,
+                    "assistant",
+                    sourceAgentName
+            );
 
-                    // 1. 广播流式事件给主会话 (实时透传)
-                    if (response.getRawCodexEvents() != null && !response.getRawCodexEvents().isEmpty()) {
-                        for (String rawJson : response.getRawCodexEvents()) {
-                            try {
+            agentExecutionManager.executeTask(
+                    executionContext,
+                    // 事件回调 (InternalCodexEvent)
+                    (InternalCodexEvent event) -> {
+                        if (event == null) return;
+
+                        // 1. 广播流式事件给主会话 (实时透传)
+                        try {
+                            // 注入 sender_name 到原始 JSON 中
+                            String rawJson = event.getRawEventJson();
+                            if (rawJson != null) {
                                 JsonNode node = objectMapper.readTree(rawJson);
-                                String type = node.has("type") ? node.get("type").asText() : null;
-
-                                // ✨ 注入 sender_name 到原始 JSON 中
                                 if (node.isObject()) {
-                                    ((com.fasterxml.jackson.databind.node.ObjectNode) node).put("sender_name", targetAgentName);
+                                    ((com.fasterxml.jackson.databind.node.ObjectNode) node).put("sender_name", finalTargetAgentName);
                                     rawJson = objectMapper.writeValueAsString(node);
+                                    event.setRawEventJson(rawJson); // 更新 JSON 供广播
                                 }
-
-                                // 构造内部事件并广播
-                                InternalCodexEvent event = InternalCodexEvent.processing(type, rawJson);
-                                event.setSenderName(targetAgentName);
-                                sessionStreamRegistry.broadcast(currentConversationId, event);
-                            } catch (Exception e) {
-                                log.warn("[CallAgent] 解析/广播子任务事件失败: {}", e.getMessage());
                             }
+
+                            // 广播给主会话
+                            event.setSenderName(finalTargetAgentName);
+                            sessionStreamRegistry.broadcast(currentConversationId, event);
+                        } catch (Exception e) {
+                            log.warn("[CallAgent] 解析/广播子任务事件失败: {}", e.getMessage());
                         }
+
+                        // 2. 收集最终文本结果 (用于返回给主智能体)
+                        // 使用 TaskResponseConverter 的逻辑提取文本
+                        TaskResponse respDto = TaskResponseConverter.toTaskResponse(event);
+                        if (respDto != null && respDto.getTextDelta() != null) {
+                            fullResponse.append(respDto.getTextDelta());
+                        } else if (respDto != null && respDto.getFinalResponse() != null) {
+                            // 某些情况下会有最终回复
+                            fullResponse.setLength(0);
+                            fullResponse.append(respDto.getFinalResponse());
+                        }
+                    },
+                    // 完成回调
+                    () -> {
+                        log.info("[CallAgent] ✓ 本地调用完成, 总长度: {}", fullResponse.length());
+                        resultFuture.complete(fullResponse.toString());
+                    },
+                    // 错误回调
+                    (Throwable throwable) -> {
+                        log.error("[CallAgent] ✗ 本地调用异常", throwable);
+                        resultFuture.completeExceptionally(throwable);
                     }
+            );
 
-                    // 2. 收集最终结果 (用于返回给主智能体)
-                    if (response.getFinalResponse() != null) {
-                        String content = response.getFinalResponse();
-                        fullResponse.append(content);
-                        log.debug("[CallAgent]   收到部分结果, 长度: {}", content.length());
-                    }
-                }
-
-                @Override
-                public void onError(Throwable throwable) {
-                    log.error("[CallAgent] ✗ Agent 调用失败", throwable);
-                    resultFuture.completeExceptionally(throwable);
-                }
-
-                @Override
-                public void onCompleted() {
-                    log.info("[CallAgent] ✓ 流式响应完成, 共收到 {} 个消息, 总长度: {}",
-                            messageCount, fullResponse.length());
-                    resultFuture.complete(fullResponse.toString());
-                }
-            };
-
-            agentExecutionService.executeTask(executeRequest, responseObserver);
-            log.info("[CallAgent] → executeTask 调用已发送, 等待结果...");
+            log.info("[CallAgent] → executeTask 本地任务已启动, 等待结果...");
 
             // 7. 等待结果 (最多5分钟)
             String result = resultFuture.get(5, TimeUnit.MINUTES);
