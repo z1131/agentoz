@@ -33,7 +33,7 @@ public class CodexAgentClient {
             protocol = "tri",
             check = false,
             timeout = 600000,
-            serialization = "protobuf"
+            parameters = {"serialization", "protobuf"}
     )
     private AgentService agentRpcService;
 
