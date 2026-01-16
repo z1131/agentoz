@@ -11,9 +11,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -29,7 +30,7 @@ public class GetActiveAgentsTool {
     @Autowired
     private JwtUtils jwtUtils;
 
-    @AgentTool(name = "get_active_agents", description = "获取当前会话中的所有活跃Agent列表及其状态信息。返回Agent名称、状态、最后活动时间等。")
+    @AgentTool(name = "get_active_agents", description = "获取当前会话中的所有活跃Agent列表。返回JSON格式的Agent信息，包括名称、ID、描述、状态等。")
     public String getActiveAgents(
             io.modelcontextprotocol.common.McpTransportContext ctx
     ) {
@@ -65,7 +66,7 @@ public class GetActiveAgentsTool {
             }
 
             if (conversationId == null) {
-                return "Error: 无法获取当前会话ID，请确保在有效的会话上下文中调用此工具。";
+                return "{\"error\": \"无法获取当前会话ID，请确保在有效的会话上下文中调用此工具。\"}";
             }
 
             log.info("MCP GetActiveAgents 调用: ConvId={}", conversationId);
@@ -77,7 +78,11 @@ public class GetActiveAgentsTool {
             );
 
             if (agents == null || agents.isEmpty()) {
-                return String.format("当前会话 %s 中暂无 Agent。", conversationId);
+                Map<String, Object> emptyResult = new HashMap<>();
+                emptyResult.put("conversationId", conversationId);
+                emptyResult.put("total", 0);
+                emptyResult.put("agents", List.of());
+                return toJsonString(emptyResult);
             }
 
             // 3. 按优先级和最后交互时间排序
@@ -87,46 +92,50 @@ public class GetActiveAgentsTool {
                             .thenComparing(AgentEntity::getLastInteractionAt, Comparator.nullsLast(Comparator.reverseOrder())))
                     .collect(Collectors.toList());
 
-            // 4. 构建返回结果
-            StringBuilder result = new StringBuilder();
-            result.append(String.format("当前会话共有 %d 个 Agent：\n\n", sortedAgents.size()));
+            // 4. 构建 JSON 结果
+            List<Map<String, Object>> agentsJson = sortedAgents.stream()
+                    .map(agent -> {
+                        Map<String, Object> agentInfo = new HashMap<>();
+                        agentInfo.put("agentName", agent.getAgentName());
+                        agentInfo.put("agentId", agent.getAgentId());
+                        agentInfo.put("description",
+                            agent.getDescription() != null && !agent.getDescription().isEmpty()
+                                ? agent.getDescription() : "无");
+                        agentInfo.put("state",
+                            agent.getState() != null ? agent.getState() : "UNKNOWN");
+                        agentInfo.put("stateDescription",
+                            agent.getStateDescription() != null && !agent.getStateDescription().isEmpty()
+                                ? agent.getStateDescription() : "无");
+                        return agentInfo;
+                    })
+                    .collect(Collectors.toList());
 
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            Map<String, Object> result = new HashMap<>();
+            result.put("conversationId", conversationId);
+            result.put("total", agentsJson.size());
+            result.put("agents", agentsJson);
 
-            for (int i = 0; i < sortedAgents.size(); i++) {
-                AgentEntity agent = sortedAgents.get(i);
-                result.append(String.format("%d. %s\n", i + 1, agent.getAgentName()));
-                result.append(String.format("   - Agent ID: %s\n", agent.getAgentId()));
-                result.append(String.format("   - 状态: %s\n",
-                        agent.getState() != null ? agent.getState() : "UNKNOWN"));
-                result.append(String.format("   - 描述: %s\n",
-                        agent.getDescription() != null && !agent.getDescription().isEmpty() ? agent.getDescription() : "无"));
-
-                if (agent.getStateDescription() != null && !agent.getStateDescription().isEmpty()) {
-                    result.append(String.format("   - 当前活动: %s\n", agent.getStateDescription()));
-                }
-
-                if (agent.getLastInteractionAt() != null) {
-                    result.append(String.format("   - 最后交互时间: %s\n",
-                            agent.getLastInteractionAt().format(formatter)));
-                }
-
-                if (agent.getInteractionCount() != null && agent.getInteractionCount() > 0) {
-                    result.append(String.format("   - 交互次数: %d\n", agent.getInteractionCount()));
-                }
-
-                if (agent.getPriority() != null) {
-                    result.append(String.format("   - 优先级: %d\n", agent.getPriority()));
-                }
-
-                result.append("\n");
-            }
-
-            return result.toString();
+            return toJsonString(result);
 
         } catch (Exception e) {
             log.error("GetActiveAgents 工具执行异常", e);
-            return "Error: 工具执行失败 - " + e.getMessage();
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("error", "工具执行失败");
+            errorResult.put("message", e.getMessage());
+            return toJsonString(errorResult);
+        }
+    }
+
+    /**
+     * 将 Map 转换为 JSON 字符串
+     */
+    private String toJsonString(Map<String, Object> data) {
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            return mapper.writeValueAsString(data);
+        } catch (Exception e) {
+            log.error("JSON 序列化失败", e);
+            return "{\"error\": \"JSON序列化失败\"}";
         }
     }
 }
