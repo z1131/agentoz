@@ -47,16 +47,18 @@ public class CallAgentTool {
             String conversationId = null;
 
             if (ctx != null) {
-                // 调试日志：检查关键请求头是否存在
-                boolean hasConvId = ctx.get("X-Conversation-ID") != null;
-                boolean hasAgentId = ctx.get("X-Agent-ID") != null;
-                boolean hasAuth = ctx.get("Authorization") != null;
+                // 调试日志：检查关键请求头是否存在（支持大小写不敏感）
+                boolean hasConvId = ctx.get("X-Conversation-ID") != null || ctx.get("x-conversation-id") != null;
+                boolean hasAgentId = ctx.get("X-Agent-ID") != null || ctx.get("x-agent-id") != null;
+                boolean hasAuth = ctx.get("Authorization") != null || ctx.get("authorization") != null;
                 log.info("[CallAgent] MCP Transport Context 检查 - " +
                         "X-Conversation-ID: {}, X-Agent-ID: {}, Authorization: {}",
                         hasConvId, hasAgentId, hasAuth);
 
-                // 从 X-Conversation-ID 请求头获取会话ID
+                // 从 X-Conversation-ID 请求头获取会话ID（支持大小写不敏感）
                 Object convId = ctx.get("X-Conversation-ID");
+                if (convId == null) convId = ctx.get("x-conversation-id");
+
                 if (convId != null) {
                     conversationId = convId.toString();
                     log.info("[CallAgent] ✓ 从 X-Conversation-ID 请求头获取会话ID: {}", conversationId);
@@ -64,8 +66,10 @@ public class CallAgentTool {
                     log.warn("[CallAgent] ✗ 未找到 X-Conversation-ID 请求头");
                 }
 
-                // 从 X-Agent-ID 请求头获取 Agent ID
+                // 从 X-Agent-ID 请求头获取 Agent ID（支持大小写不敏感）
                 Object agentId = ctx.get("X-Agent-ID");
+                if (agentId == null) agentId = ctx.get("x-agent-id");
+
                 if (agentId != null) {
                     sourceAgentId = agentId.toString();
                     log.info("[CallAgent] ✓ 从 X-Agent-ID 请求头获取 AgentID: {}", sourceAgentId);
