@@ -307,7 +307,7 @@ public class AgentExecutionManager {
     /**
      * 解析目标 Agent ID
      */
-    private String resolveAgentId(ExecutionContext context) {
+    private String resolveAgentId(ExecutionContextExtended context) {
         String agentId = context.agentId();
 
         if (agentId == null || agentId.isEmpty()) {
