@@ -32,7 +32,7 @@ public class CodexAgentClient {
             url = "tri://${codex.agent.host}:${codex.agent.port}",
             protocol = "tri",
             check = false,
-            timeout = 600000,
+            timeout = 3600000,
             parameters = {"serialization", "protobuf"}
     )
     private AgentService agentRpcService;

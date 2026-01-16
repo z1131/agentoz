@@ -204,8 +204,8 @@ public class CallAgentTool {
 
             log.info("[CallAgent] → executeTask 本地任务已启动, 等待结果...");
 
-            // 7. 等待结果 (最多5分钟)
-            String result = resultFuture.get(5, TimeUnit.MINUTES);
+            // 7. 等待结果 (最多30分钟)
+            String result = resultFuture.get(30, TimeUnit.MINUTES);
             log.info("[CallAgent] ✓ 最终结果长度: {}, 内容预览: {}",
                     result.length(), result.isEmpty() ? "(空)" : result.substring(0, Math.min(100, result.length())));
             return result;

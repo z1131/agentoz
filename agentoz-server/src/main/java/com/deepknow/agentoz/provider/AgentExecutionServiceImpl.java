@@ -30,7 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
  * </pre>
  */
 @Slf4j
-@DubboService(protocol = "tri", timeout = 300000)
+@DubboService(protocol = "tri", timeout = 3600000)
 public class AgentExecutionServiceImpl implements AgentExecutionService {
 
     @Autowired
