@@ -153,10 +153,10 @@ public class AgentExecutionManager {
             AgentEntity agent = loadAgent(agentId);
             AgentConfigEntity config = loadConfig(agent.getConfigId());
 
-            // 3. 追加用户消息到会话历史（用于业务展示）
+            // 3. 追加消息到会话历史（用于业务展示）
             appendMessageToConversationHistory(
                     context.conversationId(),
-                    "user",
+                    context.role(),  // ✅ 使用实际角色（user/assistant），区分用户输入和智能体调用
                     context.userMessage(),
                     context.senderName() != null ? context.senderName() : "user"
             );
