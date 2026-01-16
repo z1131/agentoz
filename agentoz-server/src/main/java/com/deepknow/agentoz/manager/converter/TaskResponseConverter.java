@@ -65,7 +65,10 @@ public class TaskResponseConverter {
             case PROCESSING -> {
                 // ✅ 核心：直接透传 Codex 原始事件
                 if (event.getRawEventJson() != null) {
-                    dto.setRawCodexEvents(List.of(event.getRawEventJson()));
+                    // 使用 ArrayList 替代 List.of()，避免 Hessian2 序列化兼容性问题
+                    List<String> list = new ArrayList<>();
+                    list.add(event.getRawEventJson());
+                    dto.setRawCodexEvents(list);
                 }
 
                 // ⚠️ 兼容旧代码：继续填充旧字段（逐步废弃）
