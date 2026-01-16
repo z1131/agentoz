@@ -270,11 +270,20 @@ public class AgentExecutionManager {
     }
 
     /**
-     * 注入系统 MCP
+     * 注入系统 MCP 并替换业务 MCP 中的占位符
+     * 支持的占位符: ${agentId}, ${conversationId}
      */
     private void injectSystemMcp(AgentConfigEntity config, String agentId, String conversationId) {
         try {
             String originalJson = config.getMcpConfigJson();
+            
+            // 1. 替换占位符 (业务方如 Paper 可以使用占位符配置动态值)
+            if (originalJson != null && !originalJson.trim().isEmpty()) {
+                originalJson = originalJson
+                    .replace("${agentId}", agentId)
+                    .replace("${conversationId}", conversationId);
+            }
+            
             ObjectNode rootNode;
             if (originalJson == null || originalJson.trim().isEmpty()) {
                 rootNode = objectMapper.createObjectNode();
@@ -283,13 +292,11 @@ public class AgentExecutionManager {
                 rootNode = node.isObject() ? (ObjectNode) node : objectMapper.createObjectNode();
             }
 
+            // 2. 注入 AgentOz 系统 MCP (用于 Agent 间协作)
             String token = jwtUtils.generateToken(agentId, conversationId);
-
             ObjectNode sysMcpConfig = objectMapper.createObjectNode();
             sysMcpConfig.put("server_type", "streamable_http");
             sysMcpConfig.put("url", websiteUrl + "/mcp/message");
-            
-            // HTTP Headers 配置 (用于传递鉴权 Token 和会话上下文)
             ObjectNode headersConfig = objectMapper.createObjectNode();
             headersConfig.put("Authorization", "Bearer " + token);
             headersConfig.put("X-Agent-ID", agentId);
@@ -304,6 +311,7 @@ public class AgentExecutionManager {
             }
             
             config.setMcpConfigJson(objectMapper.writeValueAsString(rootNode));
+            log.info("注入系统 MCP 完成: agentId={}, conversationId={}", agentId, conversationId);
         } catch (Exception e) {
             log.error("注入系统MCP失败", e);
         }
