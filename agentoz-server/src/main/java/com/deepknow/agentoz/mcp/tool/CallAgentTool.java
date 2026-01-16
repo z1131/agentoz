@@ -1,13 +1,18 @@
 package com.deepknow.agentoz.mcp.tool;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.deepknow.agentoz.api.dto.ExecuteTaskRequest;
 import com.deepknow.agentoz.api.dto.TaskResponse;
 import com.deepknow.agentoz.api.service.AgentExecutionService;
+import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
+import com.deepknow.agentoz.manager.SessionStreamRegistry;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.starter.annotation.AgentParam;
 import com.deepknow.agentoz.starter.annotation.AgentTool;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.common.stream.StreamObserver;
@@ -29,6 +34,11 @@ public class CallAgentTool {
 
     @Autowired
     private AgentRepository agentRepository;
+
+    @Autowired
+    private SessionStreamRegistry sessionStreamRegistry;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @AgentTool(name = "call_agent", description = "调用另一个Agent执行任务，实现Agent间协作。可以指定目标Agent名称和具体任务。")
     public String callAgent(
@@ -147,6 +157,8 @@ public class CallAgentTool {
             log.info("[CallAgent] → 开始调用 AgentExecutionService, TargetAgentId={}, Message={}",
                     targetAgentId, finalMessage);
 
+            final String currentConversationId = conversationId;
+
             CompletableFuture<String> resultFuture = new CompletableFuture<>();
             StreamObserver<TaskResponse> responseObserver = new StreamObserver<TaskResponse>() {
                 private final StringBuilder fullResponse = new StringBuilder();
@@ -155,19 +167,36 @@ public class CallAgentTool {
                 @Override
                 public void onNext(TaskResponse response) {
                     messageCount++;
-                    log.info("[CallAgent] ← 收到响应 #{}: {}", messageCount,
-                            response != null ? response.getClass().getSimpleName() : "null");
+                    if (response == null) return;
 
-                    if (response != null) {
-                        log.debug("[CallAgent]   响应详情: {}", response);
+                    // 1. 广播流式事件给主会话 (实时透传)
+                    if (response.getRawCodexEvents() != null && !response.getRawCodexEvents().isEmpty()) {
+                        for (String rawJson : response.getRawCodexEvents()) {
+                            try {
+                                JsonNode node = objectMapper.readTree(rawJson);
+                                String type = node.has("type") ? node.get("type").asText() : null;
 
-                        if (response.getFinalResponse() != null) {
-                            String content = response.getFinalResponse();
-                            fullResponse.append(content);
-                            log.info("[CallAgent]   追加内容, 当前长度: {}", fullResponse.length());
-                        } else {
-                            log.warn("[CallAgent]   finalResponse 为空");
+                                // ✨ 注入 sender_name 到原始 JSON 中
+                                if (node.isObject()) {
+                                    ((com.fasterxml.jackson.databind.node.ObjectNode) node).put("sender_name", targetAgentName);
+                                    rawJson = objectMapper.writeValueAsString(node);
+                                }
+
+                                // 构造内部事件并广播
+                                InternalCodexEvent event = InternalCodexEvent.processing(type, rawJson);
+                                event.setSenderName(targetAgentName);
+                                sessionStreamRegistry.broadcast(currentConversationId, event);
+                            } catch (Exception e) {
+                                log.warn("[CallAgent] 解析/广播子任务事件失败: {}", e.getMessage());
+                            }
                         }
+                    }
+
+                    // 2. 收集最终结果 (用于返回给主智能体)
+                    if (response.getFinalResponse() != null) {
+                        String content = response.getFinalResponse();
+                        fullResponse.append(content);
+                        log.debug("[CallAgent]   收到部分结果, 长度: {}", content.length());
                     }
                 }
 

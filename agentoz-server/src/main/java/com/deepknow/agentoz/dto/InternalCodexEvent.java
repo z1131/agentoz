@@ -74,6 +74,12 @@ public class InternalCodexEvent {
     private String adapterLog;
 
     /**
+     * 事件发送者名称 (e.g. "MasterAgent", "PaperSearcher")
+     * 用于前端区分消息来源
+     */
+    private String senderName;
+
+    /**
      * 事件状态枚举
      */
     public enum Status {

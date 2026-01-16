@@ -56,6 +56,7 @@ public class AgentExecutionManager {
     private final CodexAgentClient codexAgentClient;
     private final AgentContextManager agentContextManager;
     private final JwtUtils jwtUtils;
+    private final SessionStreamRegistry sessionStreamRegistry;
 
     private final String websiteUrl = "https://agentoz.deepknow.online";
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -88,6 +89,9 @@ public class AgentExecutionManager {
         String traceInfo = "ConvId=" + context.conversationId();
 
         try {
+            // 0. 注册会话通道 (用于子工具透传消息)
+            sessionStreamRegistry.register(context.conversationId(), eventConsumer);
+
             // 1. 路由到目标 Agent
             String agentId = resolveAgentId(context);
             log.info("执行任务: agentId={}, {}", agentId, traceInfo);
@@ -176,6 +180,24 @@ public class AgentExecutionManager {
                                     log.warn("转换后事件为 null, eventCase={}", proto.getEventCase());
                                     return;
                                 }
+                                // ✨ 设置主智能体名称
+                                event.setSenderName(agent.getAgentName());
+
+                                // ✨ 注入 sender_name 到 rawEventJson (兼容 Paper 透传模式)
+                                String rawJson = event.getRawEventJson();
+                                if (rawJson != null) {
+                                    try {
+                                        JsonNode node = objectMapper.readTree(rawJson);
+                                        if (node.isObject()) {
+                                            ((ObjectNode) node).put("sender_name", agent.getAgentName());
+                                            String newJson = objectMapper.writeValueAsString(node);
+                                            event.setRawEventJson(newJson);
+                                        }
+                                    } catch (Exception e) {
+                                        log.warn("无法注入 sender_name 到主智能体事件: {}", e.getMessage());
+                                    }
+                                }
+
                                 log.info("转换后事件: status={}, eventType={}", event.getStatus(), event.getEventType());
 
                                 // 收集文本响应（用于会话历史）
@@ -196,12 +218,14 @@ public class AgentExecutionManager {
 
                         @Override
                         public void onError(Throwable t) {
+                            sessionStreamRegistry.unregister(context.conversationId());
                             log.error("Codex 流错误回调触发: {}", traceInfo, t);
                             onError.accept(t);
                         }
 
                         @Override
                         public void onCompleted() {
+                            sessionStreamRegistry.unregister(context.conversationId());
                             log.info("Codex 流完成回调触发: {}", traceInfo);
                             onCompleted.run();
                         }
@@ -210,6 +234,7 @@ public class AgentExecutionManager {
             log.info("codexAgentClient.runTask() 调用已发起（异步）, conversationId={}", agent.getConversationId());
 
         } catch (Exception e) {
+            sessionStreamRegistry.unregister(context.conversationId());
             log.error("执行任务失败: {}", traceInfo, e);
             onError.accept(e);
         }

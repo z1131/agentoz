@@ -51,6 +51,8 @@ public class TaskResponseConverter {
 
         // 设置状态
         dto.setStatus(event.getStatus().name());
+        // 设置发送者
+        dto.setSenderName(event.getSenderName());
 
         // 根据状态处理
         switch (event.getStatus()) {

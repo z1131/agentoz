@@ -76,6 +76,11 @@ public class TaskResponse implements Serializable {
     private String errorMessage;
 
     /**
+     * 消息发送者名称 (e.g. "MasterAgent", "PaperSearcher")
+     */
+    private String senderName;
+
+    /**
      * 更新后的会话状态数据（JSONL 格式字节数组）
      *
      * <p>⚠️ 核心字段：这是 Agent 下次请求时需要传回的 history_rollout</p>
