@@ -270,19 +270,17 @@ public class AgentExecutionManager {
     }
 
     /**
-     * 注入系统 MCP 并替换业务 MCP 中的占位符
-     * 支持的占位符: ${agentId}, ${conversationId}
+     * 注入系统 MCP 并为所有业务 MCP 注入通用请求头
+     * 
+     * <p>职责划分：</p>
+     * <ul>
+     *   <li>业务方（如 Paper）：配置 MCP 的静态部分（URL、第三方认证等）</li>
+     *   <li>AgentOz：注入运行时上下文（agentId, conversationId）到所有 MCP</li>
+     * </ul>
      */
     private void injectSystemMcp(AgentConfigEntity config, String agentId, String conversationId) {
         try {
             String originalJson = config.getMcpConfigJson();
-            
-            // 1. 替换占位符 (业务方如 Paper 可以使用占位符配置动态值)
-            if (originalJson != null && !originalJson.trim().isEmpty()) {
-                originalJson = originalJson
-                    .replace("${agentId}", agentId)
-                    .replace("${conversationId}", conversationId);
-            }
             
             ObjectNode rootNode;
             if (originalJson == null || originalJson.trim().isEmpty()) {
@@ -292,26 +290,50 @@ public class AgentExecutionManager {
                 rootNode = node.isObject() ? (ObjectNode) node : objectMapper.createObjectNode();
             }
 
-            // 2. 注入 AgentOz 系统 MCP (用于 Agent 间协作)
+            // 1. 确定 MCP 配置的根节点（兼容 mcp_servers 嵌套结构）
+            ObjectNode mcpRoot = rootNode;
+            if (rootNode.has("mcp_servers") && rootNode.get("mcp_servers").isObject()) {
+                mcpRoot = (ObjectNode) rootNode.get("mcp_servers");
+            }
+
+            // 2. 为所有已有的业务 MCP 注入通用请求头
+            final ObjectNode finalMcpRoot = mcpRoot;
+            java.util.List<String> mcpNames = new java.util.ArrayList<>();
+            mcpRoot.fieldNames().forEachRemaining(mcpNames::add);
+            for (String mcpName : mcpNames) {
+                JsonNode mcpConfig = finalMcpRoot.get(mcpName);
+                if (mcpConfig.isObject()) {
+                    ObjectNode mcpNode = (ObjectNode) mcpConfig;
+                    ObjectNode headers = mcpNode.has("http_headers") && mcpNode.get("http_headers").isObject()
+                            ? (ObjectNode) mcpNode.get("http_headers")
+                            : objectMapper.createObjectNode();
+                    
+                    // 注入通用请求头（不覆盖已有的值）
+                    if (!headers.has("X-Agent-ID")) {
+                        headers.put("X-Agent-ID", agentId);
+                    }
+                    if (!headers.has("X-Conversation-ID")) {
+                        headers.put("X-Conversation-ID", conversationId);
+                    }
+                    mcpNode.set("http_headers", headers);
+                }
+            }
+
+            // 3. 注入 AgentOz 系统 MCP（用于 Agent 间协作）
             String token = jwtUtils.generateToken(agentId, conversationId);
             ObjectNode sysMcpConfig = objectMapper.createObjectNode();
             sysMcpConfig.put("server_type", "streamable_http");
             sysMcpConfig.put("url", websiteUrl + "/mcp/message");
-            ObjectNode headersConfig = objectMapper.createObjectNode();
-            headersConfig.put("Authorization", "Bearer " + token);
-            headersConfig.put("X-Agent-ID", agentId);
-            headersConfig.put("X-Conversation-ID", conversationId);
-            sysMcpConfig.set("http_headers", headersConfig);
-
-            // 修正: 检查是否存在 mcp_servers 嵌套结构，避免注入位置错误导致被解析器忽略
-            if (rootNode.has("mcp_servers") && rootNode.get("mcp_servers").isObject()) {
-                ((ObjectNode) rootNode.get("mcp_servers")).set("agentoz_system", sysMcpConfig);
-            } else {
-                rootNode.set("agentoz_system", sysMcpConfig);
-            }
+            ObjectNode sysHeaders = objectMapper.createObjectNode();
+            sysHeaders.put("Authorization", "Bearer " + token);
+            sysHeaders.put("X-Agent-ID", agentId);
+            sysHeaders.put("X-Conversation-ID", conversationId);
+            sysMcpConfig.set("http_headers", sysHeaders);
+            mcpRoot.set("agentoz_system", sysMcpConfig);
             
             config.setMcpConfigJson(objectMapper.writeValueAsString(rootNode));
-            log.info("注入系统 MCP 完成: agentId={}, conversationId={}", agentId, conversationId);
+            log.info("注入系统 MCP 完成: agentId={}, conversationId={}, mcpCount={}", 
+                    agentId, conversationId, mcpRoot.size());
         } catch (Exception e) {
             log.error("注入系统MCP失败", e);
         }
