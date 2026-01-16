@@ -289,9 +289,11 @@ public class AgentExecutionManager {
             sysMcpConfig.put("server_type", "streamable_http");
             sysMcpConfig.put("url", websiteUrl + "/mcp/message");
             
-            // HTTP Headers 配置 (用于传递鉴权 Token)
+            // HTTP Headers 配置 (用于传递鉴权 Token 和会话上下文)
             ObjectNode headersConfig = objectMapper.createObjectNode();
             headersConfig.put("Authorization", "Bearer " + token);
+            headersConfig.put("X-Agent-ID", agentId);
+            headersConfig.put("X-Conversation-ID", conversationId);
             sysMcpConfig.set("http_headers", headersConfig);
 
             // 修正: 检查是否存在 mcp_servers 嵌套结构，避免注入位置错误导致被解析器忽略
