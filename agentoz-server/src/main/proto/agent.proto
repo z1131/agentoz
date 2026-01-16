@@ -138,6 +138,9 @@ message McpServerDef {
 
   // streamable_http 模式: 服务 URL
   string url = 5;
+
+  // streamable_http 模式: HTTP 请求头 (用于传递认证信息等)
+  map<string, string> http_headers = 6;
 }
 
 // =============================================================================
