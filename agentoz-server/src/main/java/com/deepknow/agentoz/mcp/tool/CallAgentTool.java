@@ -144,30 +144,55 @@ public class CallAgentTool {
             executeRequest.setSenderName(sourceAgentName);
 
             // 6. 同步调用 Agent 服务
+            log.info("[CallAgent] → 开始调用 AgentExecutionService, TargetAgentId={}, Message={}",
+                    targetAgentId, finalMessage);
+
             CompletableFuture<String> resultFuture = new CompletableFuture<>();
             StreamObserver<TaskResponse> responseObserver = new StreamObserver<TaskResponse>() {
                 private final StringBuilder fullResponse = new StringBuilder();
+                private int messageCount = 0;
+
                 @Override
                 public void onNext(TaskResponse response) {
-                    if (response != null && response.getFinalResponse() != null) {
-                        fullResponse.append(response.getFinalResponse());
+                    messageCount++;
+                    log.info("[CallAgent] ← 收到响应 #{}: {}", messageCount,
+                            response != null ? response.getClass().getSimpleName() : "null");
+
+                    if (response != null) {
+                        log.debug("[CallAgent]   响应详情: {}", response);
+
+                        if (response.getFinalResponse() != null) {
+                            String content = response.getFinalResponse();
+                            fullResponse.append(content);
+                            log.info("[CallAgent]   追加内容, 当前长度: {}", fullResponse.length());
+                        } else {
+                            log.warn("[CallAgent]   finalResponse 为空");
+                        }
                     }
                 }
+
                 @Override
                 public void onError(Throwable throwable) {
-                    log.error("Agent 调用失败", throwable);
+                    log.error("[CallAgent] ✗ Agent 调用失败", throwable);
                     resultFuture.completeExceptionally(throwable);
                 }
+
                 @Override
                 public void onCompleted() {
+                    log.info("[CallAgent] ✓ 流式响应完成, 共收到 {} 个消息, 总长度: {}",
+                            messageCount, fullResponse.length());
                     resultFuture.complete(fullResponse.toString());
                 }
             };
 
             agentExecutionService.executeTask(executeRequest, responseObserver);
+            log.info("[CallAgent] → executeTask 调用已发送, 等待结果...");
 
             // 7. 等待结果 (最多5分钟)
-            return resultFuture.get(5, TimeUnit.MINUTES);
+            String result = resultFuture.get(5, TimeUnit.MINUTES);
+            log.info("[CallAgent] ✓ 最终结果长度: {}, 内容预览: {}",
+                    result.length(), result.isEmpty() ? "(空)" : result.substring(0, Math.min(100, result.length())));
+            return result;
 
         } catch (Exception e) {
             log.error("CallAgent 工具执行异常", e);
