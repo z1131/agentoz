@@ -5,11 +5,9 @@ import com.deepknow.agentoz.api.dto.ExecuteTaskRequest;
 import com.deepknow.agentoz.api.dto.TaskResponse;
 import com.deepknow.agentoz.api.service.AgentExecutionService;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
-import com.deepknow.agentoz.infra.util.JwtUtils;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.starter.annotation.AgentParam;
 import com.deepknow.agentoz.starter.annotation.AgentTool;
-import io.jsonwebtoken.Claims;
 import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.common.stream.StreamObserver;
@@ -30,9 +28,6 @@ public class CallAgentTool {
     private AgentExecutionService agentExecutionService;
 
     @Autowired
-    private JwtUtils jwtUtils;
-
-    @Autowired
     private AgentRepository agentRepository;
 
     @AgentTool(name = "call_agent", description = "调用另一个Agent执行任务，实现Agent间协作。可以指定目标Agent名称和具体任务。")
@@ -43,57 +38,79 @@ public class CallAgentTool {
             @AgentParam(name = "context", value = "附加的上下文信息（可选）", required = false) String context
     ) {
         try {
-            // 1. 身份识别 (从 McpTransportContext 获取，由 Starter 自动注入)
-            String token = null;
-            if (ctx != null) {
-                Object securityToken = ctx.get("SECURITY_TOKEN");
-                if (securityToken != null) {
-                    token = securityToken.toString();
-                } else {
-                    // 备选：尝试直接获取 Authorization Key
-                    Object auth = ctx.get("Authorization");
-                    if (auth == null) auth = ctx.get("authorization");
-                    if (auth != null) token = auth.toString();
-                }
-                
-                // 清理 Bearer 前缀
-                if (token != null && token.startsWith("Bearer ")) {
-                    token = token.substring(7);
-                }
-            }
+            log.info("[CallAgent] 开始处理调用请求, targetAgentName={}, task={}",
+                    targetAgentName, task);
 
+            // 1. 从 MCP Transport Context 获取会话信息和身份信息
             String sourceAgentId = "unknown";
             String sourceAgentName = "Assistant";
             String conversationId = null;
 
-                if (token != null) {
-                    try {
-                        Claims claims = jwtUtils.validateToken(token);
-                        if (claims != null) {
-                            sourceAgentId = claims.getSubject();
-                            conversationId = claims.get("cid", String.class);
-                            // 查找发送者名称
-                            AgentEntity sourceAgent = agentRepository.selectOne(
-                                    new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, sourceAgentId)
-                            );
+            if (ctx != null) {
+                // 调试日志：检查关键请求头是否存在
+                boolean hasConvId = ctx.get("X-Conversation-ID") != null;
+                boolean hasAgentId = ctx.get("X-Agent-ID") != null;
+                boolean hasAuth = ctx.get("Authorization") != null;
+                log.info("[CallAgent] MCP Transport Context 检查 - " +
+                        "X-Conversation-ID: {}, X-Agent-ID: {}, Authorization: {}",
+                        hasConvId, hasAgentId, hasAuth);
 
-                            if (sourceAgent != null) {
-                                sourceAgentName = sourceAgent.getAgentName();
-                            }
-                        }
+                // 从 X-Conversation-ID 请求头获取会话ID
+                Object convId = ctx.get("X-Conversation-ID");
+                if (convId != null) {
+                    conversationId = convId.toString();
+                    log.info("[CallAgent] ✓ 从 X-Conversation-ID 请求头获取会话ID: {}", conversationId);
+                } else {
+                    log.warn("[CallAgent] ✗ 未找到 X-Conversation-ID 请求头");
+                }
 
-                    } catch (Exception e) {
-                        log.warn("Token 解析或发送者识别异常: {}", e.getMessage());
+                // 从 X-Agent-ID 请求头获取 Agent ID
+                Object agentId = ctx.get("X-Agent-ID");
+                if (agentId != null) {
+                    sourceAgentId = agentId.toString();
+                    log.info("[CallAgent] ✓ 从 X-Agent-ID 请求头获取 AgentID: {}", sourceAgentId);
+                } else {
+                    log.warn("[CallAgent] ✗ 未找到 X-Agent-ID 请求头");
+                }
+            } else {
+                log.error("[CallAgent] ✗ MCP Transport Context 为空");
+            }
+
+            // 查找发送者名称
+            if (sourceAgentId != null && !sourceAgentId.equals("unknown")) {
+                try {
+                    AgentEntity sourceAgent = agentRepository.selectOne(
+                            new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, sourceAgentId)
+                    );
+
+                    if (sourceAgent != null) {
+                        sourceAgentName = sourceAgent.getAgentName();
+                        log.info("[CallAgent] ✓ 查找到发送者名称: {}", sourceAgentName);
+                    } else {
+                        log.warn("[CallAgent] ✗ 未找到 AgentID={} 对应的 Agent 记录", sourceAgentId);
                     }
-
+                } catch (Exception e) {
+                    log.warn("[CallAgent] ✗ 查找发送者名称失败: {}", e.getMessage());
                 }
+            }
 
-                if (conversationId == null) {
-                    return "Error: 无法获取当前会话ID，请确保在有效的会话上下文中调用此工具。";
+            // 验证会话ID
+            if (conversationId == null) {
+                log.error("[CallAgent] ✗ 无法获取会话ID，调用失败");
+                String debugInfo = "Error: 无法获取当前会话ID。\n" +
+                       "调试信息:\n" +
+                       "- MCP Transport Context: " + (ctx != null ? "存在" : "为空") + "\n";
+                if (ctx != null) {
+                    debugInfo += String.format("- X-Conversation-ID: %s\n", ctx.get("X-Conversation-ID") != null ? "存在" : "缺失");
+                    debugInfo += String.format("- X-Agent-ID: %s\n", ctx.get("X-Agent-ID") != null ? "存在" : "缺失");
+                    debugInfo += String.format("- Authorization: %s\n", ctx.get("Authorization") != null ? "存在" : "缺失");
                 }
+                debugInfo += "请确保 AgentExecutionManager 为 MCP 配置注入了 X-Conversation-ID 请求头。";
+                return debugInfo;
+            }
 
-                log.info(">>> MCP CallAgent 调用: Source[{}({})] -> TargetName[{}], ConvId={}",
-                        sourceAgentName, sourceAgentId, targetAgentName, conversationId);
+            log.info("[CallAgent] ✓ 验证通过 - Source[{}({})] -> TargetName[{}], ConvId={}",
+                    sourceAgentName, sourceAgentId, targetAgentName, conversationId);
 
             // 3. 解析目标 Agent ID (Name -> ID)
             AgentEntity targetAgent = agentRepository.selectOne(
