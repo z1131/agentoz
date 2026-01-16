@@ -73,6 +73,26 @@ public class AgentExecutionManager {
     ) {}
 
     /**
+     * 执行任务请求上下文（扩展版 - 支持子任务标识）
+     */
+    public record ExecutionContextExtended(
+            String agentId,
+            String conversationId,
+            String userMessage,
+            String role,
+            String senderName,
+            boolean isSubTask  // 是否为子任务（通过 call_agent 调用）
+    ) {
+        public ExecutionContextExtended(String agentId, String conversationId, String userMessage, String role, String senderName) {
+            this(agentId, conversationId, userMessage, role, senderName, false);
+        }
+
+        public ExecutionContext toExecutionContext() {
+            return new ExecutionContext(agentId, conversationId, userMessage, role, senderName);
+        }
+    }
+
+    /**
      * 执行任务 - 核心业务逻辑
      *
      * @param context 执行上下文
@@ -86,11 +106,44 @@ public class AgentExecutionManager {
             Runnable onCompleted,
             Consumer<Throwable> onError
     ) {
+        executeTaskExtended(new ExecutionContextExtended(
+                context.agentId(),
+                context.conversationId(),
+                context.userMessage(),
+                context.role(),
+                context.senderName(),
+                false  // 默认不是子任务
+        ), eventConsumer, onCompleted, onError);
+    }
+
+    /**
+     * 执行任务 - 扩展版（支持子任务标识）
+     *
+     * @param context 执行上下文（扩展版）
+     * @param eventConsumer 事件消费者（流式回调）
+     * @param onCompleted 完成回调
+     * @param onError 错误回调
+     */
+    public void executeTaskExtended(
+            ExecutionContextExtended context,
+            Consumer<InternalCodexEvent> eventConsumer,
+            Runnable onCompleted,
+            Consumer<Throwable> onError
+    ) {
         String traceInfo = "ConvId=" + context.conversationId();
 
         try {
-            // 0. 注册会话通道 (用于子工具透传消息)
-            sessionStreamRegistry.register(context.conversationId(), eventConsumer);
+            // 0. 注册会话通道 (仅主任务注册，子任务不注册)
+            // 判断逻辑：如果调用栈中有 CallAgentTool，则认为是子任务
+            boolean isSubTask = context.isSubTask() || isCalledFromCallAgentTool();
+
+            if (!isSubTask) {
+                sessionStreamRegistry.register(context.conversationId(), eventConsumer);
+                log.info("[AgentExecutionManager] ✓ 注册主任务流: conversationId={}", context.conversationId());
+            } else {
+                log.debug("[AgentExecutionManager] ⊗ 跳过子任务注册: conversationId={}, 来自CallAgentTool",
+                        context.conversationId());
+            }
 
             // 1. 路由到目标 Agent
             String agentId = resolveAgentId(context);
@@ -218,14 +271,20 @@ public class AgentExecutionManager {
 
                         @Override
                         public void onError(Throwable t) {
-                            sessionStreamRegistry.unregister(context.conversationId());
+                            // 只在主任务时注销流
+                            if (!context.isSubTask() && !isCalledFromCallAgentTool()) {
+                                sessionStreamRegistry.unregister(context.conversationId());
+                            }
                             log.error("Codex 流错误回调触发: {}", traceInfo, t);
                             onError.accept(t);
                         }
 
                         @Override
                         public void onCompleted() {
-                            sessionStreamRegistry.unregister(context.conversationId());
+                            // 只在主任务时注销流
+                            if (!context.isSubTask() && !isCalledFromCallAgentTool()) {
+                                sessionStreamRegistry.unregister(context.conversationId());
+                            }
                             log.info("Codex 流完成回调触发: {}", traceInfo);
                             onCompleted.run();
                         }
@@ -234,7 +293,10 @@ public class AgentExecutionManager {
             log.info("codexAgentClient.runTask() 调用已发起（异步）, conversationId={}", agent.getConversationId());
 
         } catch (Exception e) {
-            sessionStreamRegistry.unregister(context.conversationId());
+            // 只在主任务时注销流
+            if (!context.isSubTask() && !isCalledFromCallAgentTool()) {
+                sessionStreamRegistry.unregister(context.conversationId());
+            }
             log.error("执行任务失败: {}", traceInfo, e);
             onError.accept(e);
         }
@@ -487,5 +549,23 @@ public class AgentExecutionManager {
     private String truncateText(String text, int maxLength) {
         if (text == null) return null;
         return text.length() <= maxLength ? text : text.substring(0, maxLength) + "...";
+    }
+
+    /**
+     * 检测当前调用是否来自 CallAgentTool
+     * 通过检查调用栈判断是否为子任务调用
+     */
+    private boolean isCalledFromCallAgentTool() {
+        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+        for (StackTraceElement element : stackTrace) {
+            String className = element.getClassName();
+            // 检查调用栈中是否有 CallAgentTool
+            if (className.contains("CallAgentTool") &&
+                !className.contains("AgentExecutionManager")) {
+                log.debug("[AgentExecutionManager] 检测到来自 CallAgentTool 的调用");
+                return true;
+            }
+        }
+        return false;
     }
 }

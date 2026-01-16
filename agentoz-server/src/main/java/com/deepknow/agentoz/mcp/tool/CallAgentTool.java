@@ -153,15 +153,18 @@ public class CallAgentTool {
             final StringBuilder fullResponse = new StringBuilder();
 
             // 6. 本地异步调用执行管理器 (不走 Dubbo RPC)
-            AgentExecutionManager.ExecutionContext executionContext = new AgentExecutionManager.ExecutionContext(
-                    targetAgentId,
-                    conversationId,
-                    finalMessage,
-                    "assistant",
-                    sourceAgentName
-            );
+            // 使用 ExecutionContextExtended 标记为子任务
+            AgentExecutionManager.ExecutionContextExtended executionContext =
+                    new AgentExecutionManager.ExecutionContextExtended(
+                            targetAgentId,
+                            conversationId,
+                            finalMessage,
+                            "assistant",
+                            sourceAgentName,
+                            true  // ⭐ 标记为子任务，避免注册到 SessionStreamRegistry
+                    );
 
-            agentExecutionManager.executeTask(
+            agentExecutionManager.executeTaskExtended(
                     executionContext,
                     // 事件回调 (InternalCodexEvent)
                     (InternalCodexEvent event) -> {
