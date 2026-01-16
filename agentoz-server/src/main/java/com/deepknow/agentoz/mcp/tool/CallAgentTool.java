@@ -12,8 +12,6 @@ import com.deepknow.agentoz.manager.converter.TaskResponseConverter;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.starter.annotation.AgentParam;
 import com.deepknow.agentoz.starter.annotation.AgentTool;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.common.stream.StreamObserver;
@@ -38,8 +36,6 @@ public class CallAgentTool {
 
     @Autowired
     private SessionStreamRegistry sessionStreamRegistry;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @AgentTool(name = "call_agent", description = "调用另一个Agent执行任务，实现Agent间协作。可以指定目标Agent名称和具体任务。")
     public String callAgent(
@@ -173,22 +169,11 @@ public class CallAgentTool {
 
                         // 1. 广播流式事件给主会话 (实时透传)
                         try {
-                            // 注入 sender_name 到原始 JSON 中
-                            String rawJson = event.getRawEventJson();
-                            if (rawJson != null) {
-                                JsonNode node = objectMapper.readTree(rawJson);
-                                if (node.isObject()) {
-                                    ((com.fasterxml.jackson.databind.node.ObjectNode) node).put("sender_name", finalTargetAgentName);
-                                    rawJson = objectMapper.writeValueAsString(node);
-                                    event.setRawEventJson(rawJson); // 更新 JSON 供广播
-                                }
-                            }
-
-                            // 广播给主会话
+                            // 设置发送者名称（不修改原始 JSON，避免 StackOverflow）
                             event.setSenderName(finalTargetAgentName);
                             sessionStreamRegistry.broadcast(currentConversationId, event);
                         } catch (Exception e) {
-                            log.warn("[CallAgent] 解析/广播子任务事件失败: {}", e.getMessage());
+                            log.warn("[CallAgent] 广播子任务事件失败: {}", e.getMessage());
                         }
 
                         // 2. 收集最终文本结果 (用于返回给主智能体)
