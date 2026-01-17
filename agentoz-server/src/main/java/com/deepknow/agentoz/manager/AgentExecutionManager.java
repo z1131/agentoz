@@ -103,13 +103,24 @@ public class AgentExecutionManager {
                         persist(context.conversationId(), agent.getAgentName(), e);
                         collect(e, sb);
                         
+                        // ⭐ 核心修正：深度扫描工具执行结果
                         if ("item_completed".equals(e.getEventType()) && e.getRawEventJson() != null) {
-                            JsonNode toolRes = objectMapper.readTree(e.getRawEventJson()).path("item").path("result");
-                            String resStr = toolRes.toString();
-                            if (resStr.contains(CallAgentTool.A2A_DELEGATED_MARKER)) {
-                                int s = resStr.indexOf(CallAgentTool.A2A_DELEGATED_MARKER) + CallAgentTool.A2A_DELEGATED_MARKER.length();
-                                int end = resStr.indexOf("]", s);
-                                if (end > s) subId = resStr.substring(s, end);
+                            JsonNode root = objectMapper.readTree(e.getRawEventJson());
+                            // 穿透 MCP 结构: item -> result -> content[0] -> text
+                            JsonNode toolResult = root.path("item").path("result");
+                            JsonNode contentArr = toolResult.path("content");
+                            if (contentArr.isArray()) {
+                                for (JsonNode contentItem : contentArr) {
+                                    String text = contentItem.path("text").asText("");
+                                    if (text.contains(CallAgentTool.A2A_DELEGATED_MARKER)) {
+                                        int s = text.indexOf(CallAgentTool.A2A_DELEGATED_MARKER) + CallAgentTool.A2A_DELEGATED_MARKER.length();
+                                        int end = text.indexOf("]", s);
+                                        if (end > s) {
+                                            subId = text.substring(s, end);
+                                            log.info("[A2A] 🎯 FOUND DELEGATION MARKER: subTaskId={}", subId);
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -126,11 +137,13 @@ public class AgentExecutionManager {
                 @Override
                 public void onCompleted() {
                     if (subId != null) {
+                        log.info("[A2A] ⚡ SESSION SUSPENDED, waiting for subTask: {}", subId);
                         a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
                                 .taskId(subId).conversationId(context.conversationId())
                                 .a2aContext(a2a.next(curTask))
                                 .onTaskCompleted((String res) -> {
-                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "委派任务执行结果：\n" + res, "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
+                                    log.info("[A2A] 🔔 AWAKENING parent task with result from: {}", subId);
+                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "这是刚才委派任务的最终执行结果：\n" + res, "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
                                 }).startTime(System.currentTimeMillis()).build());
                     } else {
                         a2aTaskRegistry.unregisterTask(curTask);
@@ -138,7 +151,7 @@ public class AgentExecutionManager {
                     }
                 }
             });
-        } catch (Exception e) { a2aTaskRegistry.unregisterTask(curTask); onError.accept(e); }
+        } catch (Exception e) { a2aTaskRegistry.unregisterTask(curTask); log.error("Execution error", e); onError.accept(e); }
     }
 
     private String resolveAgentId(ExecutionContextExtended c) {
@@ -193,10 +206,12 @@ public class AgentExecutionManager {
             if (i != null) {
                 appendH(cid, i);
                 if (ev.getDisplayItems() == null) ev.setDisplayItems(new java.util.ArrayList<>());
-                ev.getDisplayItems().add(i.toString());
+                ev.getDisplayItems().add(itemToJson(i));
             }
         } catch (Exception ignored) {}
     }
+
+    private String itemToJson(ObjectNode node) { try { return objectMapper.writeValueAsString(node); } catch (Exception e) { return "{}"; } }
 
     private ObjectNode msg(String s, JsonNode n) {
         ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "AgentMessage"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString());
