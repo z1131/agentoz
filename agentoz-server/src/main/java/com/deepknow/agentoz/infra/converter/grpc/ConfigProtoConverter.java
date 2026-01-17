@@ -202,6 +202,7 @@ public class ConfigProtoConverter {
                 Iterator<Map.Entry<String, JsonNode>> envFields = serverConfig.get("env").fields();
                 while (envFields.hasNext()) {
                     Map.Entry<String, JsonNode> envEntry = envFields.next();
+                    
                     defBuilder.putEnv(envEntry.getKey(), envEntry.getValue().asText());
                 }
             }
