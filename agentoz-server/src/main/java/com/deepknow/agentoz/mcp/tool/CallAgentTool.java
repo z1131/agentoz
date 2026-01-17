@@ -81,7 +81,7 @@ public class CallAgentTool {
                 if (sourceAgent != null) sourceAgentName = sourceAgent.getAgentName();
             }
 
-            // 4. 构建 A2A 上下文接力
+            // 5. 构建 A2A 上下文接力
             A2AContext parentA2aContext = A2AContext.builder()
                     .traceId(traceId != null ? traceId : UUID.randomUUID().toString())
                     .parentTaskId(parentTaskIdFromHeader)
@@ -89,19 +89,13 @@ public class CallAgentTool {
                     .originAgentId(originAgentId != null ? originAgentId : sourceAgentId)
                     .build();
             
-            // 派生下一级：使用 header 里的 parentTaskId 确保溯源链条不断
+            // 派生下一级
             A2AContext childA2aContext = parentA2aContext.next(parentTaskIdFromHeader != null ? parentTaskIdFromHeader : sourceAgentId);
 
-            // 6. 注册任务并启动执行
+            // 6. 执行子任务
             final CompletableFuture<String> resultFuture = new CompletableFuture<>();
             final StringBuilder fullResponse = new StringBuilder();
-
-            a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
-                    .taskId(subTaskId)
-                    .conversationId(conversationId)
-                    .a2aContext(childA2aContext)
-                    .startTime(System.currentTimeMillis())
-                    .build());
+            final String parentTaskId = parentTaskIdFromHeader != null ? parentTaskIdFromHeader : conversationId;
 
             AgentExecutionManager.ExecutionContextExtended executionContext =
                     new AgentExecutionManager.ExecutionContextExtended(
@@ -119,26 +113,30 @@ public class CallAgentTool {
                     (InternalCodexEvent event) -> {
                         if (event == null) return;
                         event.setSenderName(targetAgentName);
-                        a2aTaskRegistry.sendEvent(subTaskId, event);
+                        
+                        // ⭐ 关键修正：将事件推给父任务，而不是推给自己（防止无限递归）
+                        a2aTaskRegistry.sendEvent(parentTaskId, event);
+
                         TaskResponse respDto = TaskResponseConverter.toTaskResponse(event);
-                        if (respDto != null && respDto.getTextDelta() != null) fullResponse.append(respDto.getTextDelta());
+                        if (respDto != null && respDto.getTextDelta() != null) {
+                            fullResponse.append(respDto.getTextDelta());
+                        }
                     },
                     () -> {
-                        a2aTaskRegistry.unregisterTask(subTaskId);
+                        // 子任务完成，resultFuture 拿到最终结果返回给主智能体
                         resultFuture.complete(fullResponse.toString());
                     },
                     (Throwable t) -> {
-                        a2aTaskRegistry.unregisterTask(subTaskId);
                         resultFuture.completeExceptionally(t);
                     }
             );
+
 
             // 7. 暂时保留阻塞 (待第三阶段重构为完全异步)
             return resultFuture.get(30, TimeUnit.MINUTES);
 
         } catch (Exception e) {
             log.error("CallAgent 执行异常", e);
-            a2aTaskRegistry.unregisterTask(subTaskId);
             return "Error: " + e.getMessage();
         }
     }
