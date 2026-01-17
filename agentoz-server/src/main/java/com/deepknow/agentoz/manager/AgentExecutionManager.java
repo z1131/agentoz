@@ -102,12 +102,17 @@ public class AgentExecutionManager {
                         e.setSenderName(agent.getAgentName());
                         persist(context.conversationId(), agent.getAgentName(), e);
                         collect(e, sb);
-                        String t = sb.toString();
-                        if (t.contains(CallAgentTool.A2A_DELEGATED_MARKER)) {
-                            int s = t.indexOf(CallAgentTool.A2A_DELEGATED_MARKER) + CallAgentTool.A2A_DELEGATED_MARKER.length();
-                            int end = t.indexOf("]", s);
-                            if (end > s) subId = t.substring(s, end);
+                        
+                        if ("item_completed".equals(e.getEventType()) && e.getRawEventJson() != null) {
+                            JsonNode toolRes = objectMapper.readTree(e.getRawEventJson()).path("item").path("result");
+                            String resStr = toolRes.toString();
+                            if (resStr.contains(CallAgentTool.A2A_DELEGATED_MARKER)) {
+                                int s = resStr.indexOf(CallAgentTool.A2A_DELEGATED_MARKER) + CallAgentTool.A2A_DELEGATED_MARKER.length();
+                                int end = resStr.indexOf("]", s);
+                                if (end > s) subId = resStr.substring(s, end);
+                            }
                         }
+
                         if (e.getStatus() == InternalCodexEvent.Status.FINISHED) {
                             if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) agent.setActiveContextFromBytes(e.getUpdatedRollout());
                             if (sb.length() > 0) agent.updateOutputState(sb.toString());
@@ -125,7 +130,7 @@ public class AgentExecutionManager {
                                 .taskId(subId).conversationId(context.conversationId())
                                 .a2aContext(a2a.next(curTask))
                                 .onTaskCompleted((String res) -> {
-                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "结果：\n" + res, "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
+                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "委派任务执行结果：\n" + res, "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
                                 }).startTime(System.currentTimeMillis()).build());
                     } else {
                         a2aTaskRegistry.unregisterTask(curTask);
@@ -157,10 +162,10 @@ public class AgentExecutionManager {
                 }
             });
             String tk = jwtUtils.generateToken(aid, cid);
-            ObjectNode s = objectMapper.createObjectNode(); s.put("server_type", "streamable_http"); s.put("url", websiteUrl + "/mcp/message");
+            ObjectNode sys = objectMapper.createObjectNode(); sys.put("server_type", "streamable_http"); sys.put("url", websiteUrl + "/mcp/message");
             ObjectNode sh = objectMapper.createObjectNode(); sh.put("Authorization", "Bearer " + tk); sh.put("X-Agent-ID", aid); sh.put("X-Conversation-ID", cid);
             if (a != null) { sh.put("X-A2A-Trace-ID", a.getTraceId()); sh.put("X-A2A-Depth", String.valueOf(a.getDepth())); }
-            s.set("http_headers", sh); m.set("agentoz_system", s);
+            sys.set("http_headers", sh); m.set("agentoz_system", sys);
             cfg.setMcpConfigJson(objectMapper.writeValueAsString(r));
         } catch (Exception e) { log.error("Mcp fail", e); }
     }
@@ -172,30 +177,30 @@ public class AgentExecutionManager {
             if ("agent_message_delta".equals(e.getEventType())) { if (n.path("delta").has("text")) b.append(n.path("delta").path("text").asText()); }
             else if ("agent_message".equals(e.getEventType())) {
                 JsonNode c = n.path("content");
-                if (c.isArray() && b.length() == 0) for (JsonNode i : c) if (i.has("text")) b.append(i.get("text").asText());
+                if (c.isArray()) { b.setLength(0); for (JsonNode i : c) if (i.has("text")) b.append(i.get("text").asText()); }
             }
         } catch (Exception ignored) {}
     }
 
-    private void persist(String cid, String sdr, InternalCodexEvent e) {
+    private void persist(String cid, String sdr, InternalCodexEvent ev) {
         try {
-            if (e.getEventType() == null || e.getRawEventJson() == null) return;
-            JsonNode n = objectMapper.readTree(e.getRawEventJson());
+            if (ev.getEventType() == null || ev.getRawEventJson() == null) return;
+            JsonNode n = objectMapper.readTree(ev.getRawEventJson());
             ObjectNode i = null;
-            if ("agent_message".equals(e.getEventType())) i = msg(sdr, n);
-            else if ("item_completed".equals(e.getEventType())) i = tool(sdr, n);
-            else if ("agent_reasoning".equals(e.getEventType())) i = reason(sdr, n);
+            if ("agent_message".equals(ev.getEventType())) i = msg(sdr, n);
+            else if ("item_completed".equals(ev.getEventType())) i = tool(sdr, n);
+            else if ("agent_reasoning".equals(ev.getEventType())) i = reason(sdr, n);
             if (i != null) {
                 appendH(cid, i);
-                if (e.getDisplayItems() == null) e.setDisplayItems(new java.util.ArrayList<>());
-                e.getDisplayItems().add(i.toString());
+                if (ev.getDisplayItems() == null) ev.setDisplayItems(new java.util.ArrayList<>());
+                ev.getDisplayItems().add(i.toString());
             }
         } catch (Exception ignored) {}
     }
 
     private ObjectNode msg(String s, JsonNode n) {
         ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "AgentMessage"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString());
-        ArrayNode c = objectMapper.createArrayNode(); for (JsonNode x : n.path("content")) { if (x.has("text")) { ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", x.get("text").asText()); c.add(t); } }
+        ArrayNode c = objectMapper.createArrayNode(); for (JsonNode x : n.path("content")) { if (x.has("text")) { ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", x.get("text").asText()); c.add(t); } } 
         i.set("content", c); return i;
     }
 
