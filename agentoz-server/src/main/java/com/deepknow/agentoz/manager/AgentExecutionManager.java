@@ -19,9 +19,7 @@ import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.model.ConversationEntity;
 import codex.agent.RunTaskRequest;
 import codex.agent.SessionConfig;
-import io.a2a.spec.Task;
-import io.a2a.spec.TaskState;
-import io.a2a.spec.TaskStatus;
+import io.a2a.spec.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -81,17 +79,14 @@ public class AgentExecutionManager {
         final String curTask = (a2a.getDepth() == 0) ? context.conversationId() : UUID.randomUUID().toString();
 
         try {
+            // 加载 Agent
             AgentEntity agent = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, resolveAgentId(context)));
             AgentConfigEntity config = agentConfigRepository.selectOne(new LambdaQueryWrapper<AgentConfigEntity>().eq(AgentConfigEntity::getConfigId, agent.getConfigId()));
 
-            // 注册初始任务 (官方规范：全量构造)
+            // 注册初始任务 (正统 A2A)
             Task initialT = new Task(curTask, context.conversationId(), new TaskStatus(TaskState.WORKING, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
             a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
-                    .task(initialT)
-                    .conversationId(context.conversationId())
-                    .eventConsumer(eventConsumer)
-                    .startTime(System.currentTimeMillis())
-                    .build());
+                    .task(initialT).conversationId(context.conversationId()).eventConsumer(eventConsumer).startTime(System.currentTimeMillis()).build());
 
             appendMessage(context.conversationId(), context.role(), context.userMessage(), (context.senderName() != null) ? context.senderName() : "user");
             agentContextManager.onAgentCalled(agent.getAgentId(), context.userMessage(), (context.senderName() != null) ? context.senderName() : "user");
@@ -105,7 +100,7 @@ public class AgentExecutionManager {
 
             final StringBuilder sb = new StringBuilder();
             codexAgentClient.runTask(agent.getConversationId(), req, new StreamObserver<codex.agent.RunTaskResponse>() {
-                private Task subTaskResult = null;
+                private Task subTaskCandidate = null;
                 @Override
                 public void onNext(codex.agent.RunTaskResponse p) {
                     try {
@@ -121,9 +116,8 @@ public class AgentExecutionManager {
                                 String text = contentItem.path("text").asText("");
                                 if (text.contains("\"id\"") && text.contains("\"status\"")) {
                                     try {
-                                        Task potential = objectMapper.readValue(text, Task.class);
-                                        // 官方规范：Task 使用 getId()
-                                        if (potential.getId() != null) { subTaskResult = potential; }
+                                        Task t = objectMapper.readValue(text, Task.class);
+                                        if (t.getId() != null) { subTaskCandidate = t; }
                                     } catch (Exception ignored) {}
                                 }
                             }
@@ -141,15 +135,15 @@ public class AgentExecutionManager {
                 public void onError(Throwable t) { a2aTaskRegistry.unregisterTask(curTask); onError.accept(t); }
                 @Override
                 public void onCompleted() {
-                    if (subTaskResult != null) {
-                        // 官方规范：Task 使用 getId()
-                        log.info("[A2A] Suspended for: {}", subTaskResult.getId());
+                    if (subTaskCandidate != null) {
+                        log.info("[A2A] Task Suspended: {}", subTaskCandidate.getId());
                         a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
-                                .task(subTaskResult).conversationId(context.conversationId())
+                                .task(subTaskCandidate).conversationId(context.conversationId())
                                 .onTaskTerminal((Task finished) -> {
-                                    // 官方规范：Task 使用 getId()
-                                    log.info("[A2A] Awakened by: {}", finished.getId());
-                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "委派任务已执行完毕。", "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
+                                    // ⭐ 唤醒：从产物中提取结果
+                                    String resultText = extractResultFromArtifacts(finished);
+                                    log.info("[A2A] Awakened by: {}, resultLen={}", finished.getId(), resultText.length());
+                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "这是委派任务的最终执行结果：\n" + resultText, "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
                                 }).startTime(System.currentTimeMillis()).build());
                     } else {
                         a2aTaskRegistry.unregisterTask(curTask);
@@ -157,7 +151,21 @@ public class AgentExecutionManager {
                     }
                 }
             });
-        } catch (Exception e) { a2aTaskRegistry.unregisterTask(curTask); log.error("Execution error", e); onError.accept(e); }
+        } catch (Exception e) { a2aTaskRegistry.unregisterTask(curTask); log.error("Exec error", e); onError.accept(e); }
+    }
+
+    private String extractResultFromArtifacts(Task task) {
+        StringBuilder sb = new StringBuilder();
+        if (task.getArtifacts() != null) {
+            for (Artifact art : task.getArtifacts()) {
+                if (art.parts() != null) {
+                    for (Part<?> part : art.parts()) {
+                        if (part instanceof TextPart textPart) sb.append(textPart.getText());
+                    }
+                }
+            }
+        }
+        return sb.length() > 0 ? sb.toString() : "(无回复内容)";
     }
 
     private String resolveAgentId(ExecutionContextExtended c) {
@@ -219,8 +227,7 @@ public class AgentExecutionManager {
 
     private ObjectNode msg(String s, JsonNode n) {
         ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "AgentMessage"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString());
-        ArrayNode c = objectMapper.createArrayNode();
-        for (JsonNode x : n.path("content")) { if (x.has("text")) { ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", x.get("text").asText()); c.add(t); } }
+        ArrayNode c = objectMapper.createArrayNode(); for (JsonNode x : n.path("content")) { if (x.has("text")) { ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", x.get("text").asText()); c.add(t); } }
         i.set("content", c); return i;
     }
 

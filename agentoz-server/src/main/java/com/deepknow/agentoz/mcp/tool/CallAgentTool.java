@@ -12,7 +12,7 @@ import com.deepknow.agentoz.starter.annotation.AgentTool;
 import io.a2a.spec.Task;
 import io.a2a.spec.TaskStatus;
 import io.a2a.spec.TaskState;
-import io.a2a.spec.Message;
+import io.a2a.spec.Artifact;
 import io.a2a.spec.TextPart;
 import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.extern.slf4j.Slf4j;
@@ -71,8 +71,9 @@ public class CallAgentTool {
                         collectText(event, res);
                     }, 
                     () -> {
-                        // 官方规范：Task 使用全量构造，TaskStatus 使用 state() 对应的构造
-                        Task completed = new Task(subId, conversationId, new TaskStatus(TaskState.COMPLETED, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
+                        // ⭐ 正统 A2A：将结果包装为 Artifact 交付
+                        Artifact resultArt = new Artifact(UUID.randomUUID().toString(), "Result", "Agent Output", List.of(new TextPart(res.toString())), Collections.emptyMap(), Collections.emptyList());
+                        Task completed = new Task(subId, conversationId, new TaskStatus(TaskState.COMPLETED, null, OffsetDateTime.now()), List.of(resultArt), Collections.emptyList(), Collections.emptyMap());
                         a2aTaskRegistry.updateTask(subId, completed);
                     }, 
                     (Throwable t) -> {
@@ -95,7 +96,11 @@ public class CallAgentTool {
                 if (node.path("delta").has("text")) builder.append(node.path("delta").path("text").asText());
             } else if ("agent_message".equals(event.getEventType())) {
                 com.fasterxml.jackson.databind.JsonNode c = node.path("content");
-                if (c.isArray() && builder.length() == 0) for (com.fasterxml.jackson.databind.JsonNode i : c) if (i.has("text")) builder.append(i.get("text").asText());
+                if (c.isArray()) {
+                    StringBuilder fullText = new StringBuilder();
+                    for (com.fasterxml.jackson.databind.JsonNode i : c) if (i.has("text")) fullText.append(i.get("text").asText());
+                    if (fullText.length() > builder.length()) { builder.setLength(0); builder.append(fullText); }
+                }
             }
         } catch (Exception ignored) {}
     }
