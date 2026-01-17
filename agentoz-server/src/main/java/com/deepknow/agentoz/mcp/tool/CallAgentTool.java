@@ -1,28 +1,27 @@
 package com.deepknow.agentoz.mcp.tool;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.deepknow.agentoz.api.dto.ExecuteTaskRequest;
 import com.deepknow.agentoz.api.dto.TaskResponse;
 import com.deepknow.agentoz.dto.A2AContext;
 import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.manager.AgentExecutionManager;
-import com.deepknow.agentoz.manager.SessionStreamRegistry;
+import com.deepknow.agentoz.manager.A2ATaskRegistry;
 import com.deepknow.agentoz.manager.converter.TaskResponseConverter;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.starter.annotation.AgentParam;
 import com.deepknow.agentoz.starter.annotation.AgentTool;
 import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.dubbo.common.stream.StreamObserver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 
 /**
- * Call Agent Tool - 实现 Agent 间相互调用
+ * Call Agent Tool - 实现 Agent 间相互调用 (A2A 协作版)
  */
 @Slf4j
 @Component
@@ -35,7 +34,7 @@ public class CallAgentTool {
     private AgentRepository agentRepository;
 
     @Autowired
-    private SessionStreamRegistry sessionStreamRegistry;
+    private A2ATaskRegistry a2aTaskRegistry;
 
     @AgentTool(name = "call_agent", description = "调用另一个Agent执行任务，实现Agent间协作。可以指定目标Agent名称和具体任务。")
     public String callAgent(
@@ -44,172 +43,106 @@ public class CallAgentTool {
             @AgentParam(name = "task", value = "要执行的任务描述", required = true) String task,
             @AgentParam(name = "context", value = "附加的上下文信息（可选）", required = false) String context
     ) {
+        String subTaskId = UUID.randomUUID().toString();
         try {
-            log.info("[CallAgent] 开始处理调用请求, targetAgentName={}, task={}",
-                    targetAgentName, task);
+            log.info("[CallAgent] 开始委派任务, targetAgentName={}, subTaskId={}", targetAgentName, subTaskId);
 
-            // 1. 从 MCP Transport Context 获取会话信息和 A2A 上下文
-            String sourceAgentId = "unknown";
-            String sourceAgentName = "Assistant";
-            String conversationId = null;
-            
-            // A2A 上下文相关
-            String traceId = null;
+            // 1. 提取 A2A 上下文
+            String sourceAgentId = getHeader(ctx, "X-Agent-ID");
+            String conversationId = getHeader(ctx, "X-Conversation-ID");
+            String traceId = getHeader(ctx, "X-A2A-Trace-ID");
+            String originAgentId = getHeader(ctx, "X-A2A-Origin-Agent-ID");
             int currentDepth = 0;
-            String originAgentId = null;
-
-            if (ctx != null) {
-                // 从请求头获取会话和 A2A 信息（支持大小写不敏感）
-                conversationId = getHeader(ctx, "X-Conversation-ID");
-                sourceAgentId = getHeader(ctx, "X-Agent-ID");
-                
-                // ⭐ 提取 A2A 协议头
-                traceId = getHeader(ctx, "X-A2A-Trace-ID");
-                originAgentId = getHeader(ctx, "X-A2A-Origin-Agent-ID");
-                String depthStr = getHeader(ctx, "X-A2A-Depth");
-                if (depthStr != null) {
-                    try {
-                        currentDepth = Integer.parseInt(depthStr);
-                    } catch (NumberFormatException ignored) {}
-                }
-
-                log.info("[CallAgent] 提取 A2A 上下文 - TraceId: {}, Depth: {}, OriginAgent: {}",
-                        traceId, currentDepth, originAgentId);
-            }
-
-            // 2. 递归深度检查 (死循环防护)
-            if (currentDepth >= 5) {
-                log.error("[CallAgent] ✗ 触发递归深度限制: depth={}", currentDepth);
-                return "Error: 任务嵌套层次太深（已达到5层），为了系统安全已拦截调用。请检查是否存在 Agent 间的循环调用。";
-            }
-
-            // 查找发送者名称
-            if (sourceAgentId != null && !sourceAgentId.equals("unknown")) {
+            String depthStr = getHeader(ctx, "X-A2A-Depth");
+            if (depthStr != null) {
                 try {
-                    AgentEntity sourceAgent = agentRepository.selectOne(
-                            new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, sourceAgentId)
-                    );
-                    if (sourceAgent != null) {
-                        sourceAgentName = sourceAgent.getAgentName();
-                    }
-                } catch (Exception e) {
-                    log.warn("[CallAgent] 查找发送者名称失败: {}", e.getMessage());
-                }
+                    currentDepth = Integer.parseInt(depthStr);
+                } catch (NumberFormatException ignored) {}
             }
 
-            // 验证会话ID
-            if (conversationId == null) {
-                log.error("[CallAgent] ✗ 无法获取会话ID，调用失败");
-                return "Error: 无法获取当前会话ID，请联系管理员检查系统配置。";
+            // 2. 递归深度检查
+            if (currentDepth >= 5) {
+                return "Error: 任务嵌套层次太深，为了系统安全已拦截。";
             }
 
-            // 3. 解析目标 Agent ID (Name -> ID)
+            // 3. 查找目标 Agent
             AgentEntity targetAgent = agentRepository.selectOne(
                     new LambdaQueryWrapper<AgentEntity>()
                             .eq(AgentEntity::getConversationId, conversationId)
                             .eq(AgentEntity::getAgentName, targetAgentName)
             );
+            if (targetAgent == null) return String.format("Error: 找不到 Agent '%s'。", targetAgentName);
 
-            if (targetAgent == null) {
-                return String.format("Error: 在当前会话中找不到名为 '%s' 的 Agent。请确认目标 Agent 名称是否正确。", targetAgentName);
+            // 查找源 Agent 名称
+            String sourceAgentName = "Assistant";
+            if (sourceAgentId != null) {
+                AgentEntity sourceAgent = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, sourceAgentId));
+                if (sourceAgent != null) sourceAgentName = sourceAgent.getAgentName();
             }
 
-            String targetAgentId = targetAgent.getAgentId();
-
-            // 4. 构建消息 (合并 context)
-            String finalMessage = task;
-            if (context != null && !context.isBlank()) {
-                finalMessage = String.format("%s\n\n[Context]\n%s", task, context);
-            }
-
-            // 5. ⭐ 构建子任务 A2A 上下文
+            // 4. 构建 A2A 上下文接力
             A2AContext parentA2aContext = A2AContext.builder()
-                    .traceId(traceId != null ? traceId : java.util.UUID.randomUUID().toString())
+                    .traceId(traceId != null ? traceId : UUID.randomUUID().toString())
                     .depth(currentDepth)
                     .originAgentId(originAgentId != null ? originAgentId : sourceAgentId)
                     .build();
-            
-            // 派生下一级上下文
             A2AContext childA2aContext = parentA2aContext.next(sourceAgentId);
 
-            log.info("[CallAgent] → 发起委派: Source[{}] -> Target[{}], TraceId={}, NewDepth={}",
-                    sourceAgentName, targetAgentName, childA2aContext.getTraceId(), childA2aContext.getDepth());
-
-            final String currentConversationId = conversationId;
-            final String finalTargetAgentName = targetAgentName;
-
-            CompletableFuture<String> resultFuture = new CompletableFuture<>();
+            // 6. 注册任务并启动执行
+            final CompletableFuture<String> resultFuture = new CompletableFuture<>();
             final StringBuilder fullResponse = new StringBuilder();
 
-            // 6. 执行子任务
+            a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
+                    .taskId(subTaskId)
+                    .conversationId(conversationId)
+                    .a2aContext(childA2aContext)
+                    .startTime(System.currentTimeMillis())
+                    .build());
+
             AgentExecutionManager.ExecutionContextExtended executionContext =
                     new AgentExecutionManager.ExecutionContextExtended(
-                            targetAgentId,
+                            targetAgent.getAgentId(),
                             conversationId,
-                            finalMessage,
+                            task + (context != null ? "\n\nContext:\n" + context : ""),
                             "assistant",
                             sourceAgentName,
                             true,
-                            childA2aContext // ⭐ 显式传递 A2A 上下文
+                            childA2aContext
                     );
 
             agentExecutionManager.executeTaskExtended(
                     executionContext,
                     (InternalCodexEvent event) -> {
                         if (event == null) return;
-                        try {
-                            event.setSenderName(finalTargetAgentName);
-                            sessionStreamRegistry.broadcast(currentConversationId, event);
-                        } catch (Exception e) {
-                            log.warn("[CallAgent] 广播子任务事件失败: {}", e.getMessage());
-                        }
-
+                        event.setSenderName(targetAgentName);
+                        a2aTaskRegistry.sendEvent(subTaskId, event);
                         TaskResponse respDto = TaskResponseConverter.toTaskResponse(event);
-                        if (respDto != null && respDto.getTextDelta() != null) {
-                            fullResponse.append(respDto.getTextDelta());
-                        } else if (respDto != null && respDto.getFinalResponse() != null) {
-                            fullResponse.setLength(0);
-                            fullResponse.append(respDto.getFinalResponse());
-                        }
+                        if (respDto != null && respDto.getTextDelta() != null) fullResponse.append(respDto.getTextDelta());
                     },
                     () -> {
-                        log.info("[CallAgent] ✓ 委派任务完成: {}", childA2aContext.getTraceId());
+                        a2aTaskRegistry.unregisterTask(subTaskId);
                         resultFuture.complete(fullResponse.toString());
                     },
-                    (Throwable throwable) -> {
-                        log.error("[CallAgent] ✗ 委派任务异常", throwable);
-                        resultFuture.completeExceptionally(throwable);
+                    (Throwable t) -> {
+                        a2aTaskRegistry.unregisterTask(subTaskId);
+                        resultFuture.completeExceptionally(t);
                     }
             );
 
-            // 7. 等待结果 (临时保留阻塞，等第三阶段实现完全异步)
-            String result = resultFuture.get(30, TimeUnit.MINUTES);
-            return result;
+            // 7. 暂时保留阻塞 (待第三阶段重构为完全异步)
+            return resultFuture.get(30, TimeUnit.MINUTES);
 
         } catch (Exception e) {
-            log.error("CallAgent 工具执行异常", e);
-            return "Error: 工具执行失败 - " + e.getMessage();
+            log.error("CallAgent 执行异常", e);
+            a2aTaskRegistry.unregisterTask(subTaskId);
+            return "Error: " + e.getMessage();
         }
     }
 
     private String getHeader(McpTransportContext ctx, String headerName) {
+        if (ctx == null) return null;
         Object val = ctx.get(headerName);
-        if (val == null) {
-            val = ctx.get(headerName.toLowerCase());
-        }
+        if (val == null) val = ctx.get(headerName.toLowerCase());
         return val != null ? val.toString() : null;
-    }
-
-    private String extractTokenFromMap(java.util.Map<?, ?> map) {
-        for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {
-            if (entry.getKey() != null && entry.getKey().toString().equalsIgnoreCase("Authorization")) {
-                String val = entry.getValue().toString();
-                if (val.startsWith("Bearer ")) {
-                    return val.substring(7);
-                }
-                return val;
-            }
-        }
-        return null;
     }
 }
