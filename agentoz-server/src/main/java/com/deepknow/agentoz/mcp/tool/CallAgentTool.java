@@ -52,18 +52,24 @@ public class CallAgentTool {
 
             final StringBuilder res = new StringBuilder();
             agentExecutionManager.executeTaskExtended(new AgentExecutionManager.ExecutionContextExtended(
-                    target.getAgentId(), conversationId, task, "assistant", "System", true), 
+                    target.getAgentId(), conversationId, task, "assistant", "System", true),
                     (InternalCodexEvent event) -> {
                         if (event == null) return;
                         event.setSenderName(targetAgentName);
                         agentExecutionManager.broadcastSubTaskEvent(conversationId, event);
+                        agentExecutionManager.persistEvent(conversationId, targetAgentName, event);
                         collectText(event, res);
-                    }, 
+                        if (event.getStatus() == InternalCodexEvent.Status.FINISHED
+                                && event.getUpdatedRollout() != null
+                                && event.getUpdatedRollout().length > 0) {
+                            agentExecutionManager.updateAgentActiveContext(target.getAgentId(), event.getUpdatedRollout());
+                        }
+                    },
                     () -> {
                         Artifact art = new Artifact(UUID.randomUUID().toString(), "Result", null, List.of(new TextPart(res.toString())), Collections.emptyMap(), Collections.emptyList());
                         Task completed = new Task(subId, conversationId, new TaskStatus(TaskState.COMPLETED, null, OffsetDateTime.now()), List.of(art), Collections.emptyList(), Collections.emptyMap());
                         taskStore.save(completed);
-                    }, 
+                    },
                     (Throwable t) -> {
                         Task failed = new Task(subId, conversationId, new TaskStatus(TaskState.FAILED, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
                         taskStore.save(failed);

@@ -79,6 +79,34 @@ public class AgentExecutionManager {
         if (consumer != null) consumer.accept(event);
     }
 
+    /**
+     * 持久化 Codex 事件到会话历史
+     * 公开方法，供 CallAgentTool 等外部调用
+     */
+    public void persistEvent(String conversationId, String senderName, InternalCodexEvent event) {
+        persist(conversationId, senderName, event);
+    }
+
+    /**
+     * 更新 Agent 的 activeContext
+     * 公开方法，供 CallAgentTool 等外部调用
+     */
+    public void updateAgentActiveContext(String agentId, byte[] rolloutBytes) {
+        try {
+            AgentEntity agent = agentRepository.selectOne(
+                    new LambdaQueryWrapper<AgentEntity>()
+                            .eq(AgentEntity::getAgentId, agentId)
+            );
+            if (agent != null) {
+                agent.setActiveContextFromBytes(rolloutBytes);
+                agentRepository.updateById(agent);
+                log.info("Agent activeContext 已更新: agentId={}, size={} bytes", agentId, rolloutBytes != null ? rolloutBytes.length : 0);
+            }
+        } catch (Exception e) {
+            log.error("更新 Agent activeContext 失败: agentId={}", agentId, e);
+        }
+    }
+
     public void executeTaskExtended(
             ExecutionContextExtended context,
             Consumer<InternalCodexEvent> eventConsumer,
