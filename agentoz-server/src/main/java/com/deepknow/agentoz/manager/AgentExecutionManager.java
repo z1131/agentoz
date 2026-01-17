@@ -174,8 +174,21 @@ public class AgentExecutionManager {
             log.info("准备调用Codex: agentId={}, model={}, historySize={} bytes",
                     agentId, config.getLlmModel(), historyRollout.length);
 
-                // 7. 构建 Codex 请求
-                SessionConfig sessionConfig = ConfigProtoConverter.toSessionConfig(config);
+                // 7. 🔧 简单策略：有历史记录就不传配置
+                // 原因：配置不支持变更，history_rollout中已包含完整配置
+                boolean hasHistory = (historyRollout != null && historyRollout.length > 0);
+
+                SessionConfig sessionConfig;
+
+                if (hasHistory) {
+                    // 有历史记录，发送空配置（避免重复发送指令）
+                    log.info("⏩ 检测到历史记录，跳过发送配置: agentId={}", agentId);
+                    sessionConfig = SessionConfig.getDefaultInstance();
+                } else {
+                    // 首次调用，发送完整配置
+                    log.info("✨ 首次调用，发送完整配置: agentId={}", agentId);
+                    sessionConfig = ConfigProtoConverter.toSessionConfig(config);
+                }
 
                 // 7.0 打印 MCP 服务器配置（调试用）
                 log.info("[DEBUG] MCP Servers 配置: count={}, servers={}",
@@ -183,9 +196,10 @@ public class AgentExecutionManager {
                     sessionConfig.getMcpServersMap().keySet());
 
                 // 7.05 打印提示词配置（调试用）
-                log.info("[DEBUG] 提示词配置: baseInstructions长度={}, developerInstructions长度={}",
-                    sessionConfig.getBaseInstructions() != null ? sessionConfig.getBaseInstructions().length() : 0,
-                    sessionConfig.getDeveloperInstructions() != null ? sessionConfig.getDeveloperInstructions().length() : 0);
+                log.info("[DEBUG] 提示词配置: baseInstructions长度={}, developerInstructions长度={}, configChanged={}",
+                    (sessionConfig.getBaseInstructions() != null ? sessionConfig.getBaseInstructions().length() : 0),
+                    (sessionConfig.getDeveloperInstructions() != null ? sessionConfig.getDeveloperInstructions().length() : 0),
+                    configChanged);
                 if (sessionConfig.getDeveloperInstructions() != null && sessionConfig.getDeveloperInstructions().length() > 0) {
                     log.info("[DEBUG] developerInstructions内容前200字符: {}",
                         sessionConfig.getDeveloperInstructions().substring(0, Math.min(200, sessionConfig.getDeveloperInstructions().length())));
@@ -253,15 +267,18 @@ public class AgentExecutionManager {
 
                                 log.info("转换后事件: status={}, eventType={}", event.getStatus(), event.getEventType());
 
-                                // 收集文本响应（用于会话历史）
+                                // 1. 实时持久化完整事件包（Message, ToolCall, Reasoning等）
+                                persistCompleteEvent(context.conversationId(), agent.getAgentName(), event);
+
+                                // 2. 收集文本响应（仅用于更新 Agent 状态，不负责持久化历史）
                                 collectTextResponse(event, fullResponseBuilder);
 
-                                // 处理完成事件（持久化状态）
+                                // 3. 处理完成事件（仅持久化 Rollout 状态）
                                 if (event.getStatus() == InternalCodexEvent.Status.FINISHED) {
                                     handleFinished(event, agent, finalAgentId, context.conversationId(), fullResponseBuilder);
                                 }
 
-                                // 回调给调用方
+                                // 4. 回调给调用方（前端展示）
                                 eventConsumer.accept(event);
                             } catch (Exception e) {
                                 log.error("处理 Codex 事件失败", e);
@@ -467,6 +484,138 @@ public class AgentExecutionManager {
     }
 
     /**
+     * 实时持久化完整事件包
+     */
+    private void persistCompleteEvent(String conversationId, String senderName, InternalCodexEvent event) {
+        String eventType = event.getEventType();
+        String rawJson = event.getRawEventJson();
+        if (eventType == null || rawJson == null) return;
+
+        try {
+            JsonNode node = objectMapper.readTree(rawJson);
+            ObjectNode historyItem = null;
+
+            if ("agent_message".equals(eventType)) {
+                // 1. 完整的智能体回复
+                historyItem = createAgentMessageItem(senderName, node);
+            } else if ("item_completed".equals(eventType)) {
+                // 2. 完整的工具调用（包括 CallAgent）
+                historyItem = createToolCallItem(senderName, node);
+            } else if ("agent_reasoning".equals(eventType)) {
+                // 3. 完整的思考过程
+                historyItem = createReasoningItem(senderName, node);
+            }
+
+            if (historyItem != null) {
+                appendHistoryItem(conversationId, historyItem);
+                log.info("[Persistence] ✓ 已实时保存事件: type={}, sender={}", eventType, senderName);
+            }
+        } catch (Exception e) {
+            log.warn("[Persistence] ✗ 解析事件并持久化失败: type={}, error={}", eventType, e.getMessage());
+        }
+    }
+
+    private ObjectNode createAgentMessageItem(String senderName, JsonNode node) {
+        ObjectNode item = objectMapper.createObjectNode();
+        item.put("id", UUID.randomUUID().toString());
+        item.put("type", "AgentMessage");
+        item.put("sender", senderName);
+        item.put("timestamp", LocalDateTime.now().toString());
+        
+        // 转换内容格式
+        ArrayNode content = objectMapper.createArrayNode();
+        if (node.has("content") && node.get("content").isArray()) {
+            for (JsonNode c : node.get("content")) {
+                if (c.has("text")) {
+                    ObjectNode textNode = objectMapper.createObjectNode();
+                    textNode.put("type", "text");
+                    textNode.put("text", c.get("text").asText());
+                    content.add(textNode);
+                }
+            }
+        }
+        item.set("content", content);
+        return item;
+    }
+
+    private ObjectNode createToolCallItem(String senderName, JsonNode node) {
+        // 期望结构: { "item": { "type": "function_call", "name": "...", "arguments": "...", "result": "..." } }
+        if (!node.has("item")) return null;
+        JsonNode toolItem = node.get("item");
+        
+        ObjectNode item = objectMapper.createObjectNode();
+        item.put("id", UUID.randomUUID().toString());
+        item.put("type", "McpToolCall");
+        item.put("sender", senderName);
+        item.put("timestamp", LocalDateTime.now().toString());
+        
+        item.put("tool", toolItem.path("name").asText("unknown"));
+        item.set("arguments", toolItem.path("arguments"));
+        item.set("result", toolItem.path("result"));
+        
+        return item;
+    }
+
+    private ObjectNode createReasoningItem(String senderName, JsonNode node) {
+        ObjectNode item = objectMapper.createObjectNode();
+        item.put("id", UUID.randomUUID().toString());
+        item.put("type", "AgentMessage"); // 思考过程暂时也用 AgentMessage 渲染
+        item.put("sender", senderName);
+        item.put("timestamp", LocalDateTime.now().toString());
+        
+        ArrayNode content = objectMapper.createArrayNode();
+        ObjectNode textNode = objectMapper.createObjectNode();
+        textNode.put("type", "text");
+        textNode.put("text", "> [Thinking] " + node.path("content").asText(""));
+        content.add(textNode);
+        
+        item.set("content", content);
+        return item;
+    }
+
+    /**
+     * 追加历史项到会话
+     */
+    private void appendHistoryItem(String conversationId, ObjectNode historyItem) {
+        try {
+            ConversationEntity conversation = conversationRepository.selectOne(
+                    new LambdaQueryWrapper<ConversationEntity>()
+                            .eq(ConversationEntity::getConversationId, conversationId)
+            );
+            if (conversation == null) return;
+
+            String currentHistory = conversation.getHistoryContext();
+            if (currentHistory == null || currentHistory.isEmpty() || "null".equals(currentHistory)) {
+                currentHistory = "[]";
+            }
+
+            JsonNode historyNode = objectMapper.readTree(currentHistory);
+            if (historyNode.isArray()) {
+                ((ArrayNode) historyNode).add(historyItem);
+                conversation.setHistoryContext(objectMapper.writeValueAsString(historyNode));
+                
+                // 更新最后一条消息状态
+                if ("AgentMessage".equals(historyItem.get("type").asText())) {
+                    JsonNode contentArr = historyItem.get("content");
+                    if (contentArr != null && contentArr.size() > 0) {
+                        String text = contentArr.get(0).path("text").asText("");
+                        conversation.setLastMessageContent(truncateText(text, 500));
+                        conversation.setLastMessageType("assistant");
+                    }
+                }
+                
+                conversation.setLastMessageAt(LocalDateTime.now());
+                Integer count = conversation.getMessageCount();
+                conversation.setMessageCount(count != null ? count + 1 : 1);
+                
+                conversationRepository.updateById(conversation);
+            }
+        } catch (Exception e) {
+            log.error("追加历史项失败: conversationId={}", conversationId, e);
+        }
+    }
+
+    /**
      * 处理完成事件
      */
     private void handleFinished(
@@ -482,10 +631,9 @@ public class AgentExecutionManager {
         // 更新 Agent 的 activeContext
         agent.setActiveContextFromBytes(rollout);
 
-        // 记录 Assistant 响应到会话历史
+        // 更新 Agent 的输出状态（用于展示，不涉及历史记录）
         String finalResponse = fullResponseBuilder.toString();
         if (!finalResponse.isEmpty()) {
-            appendMessageToConversationHistory(conversationId, "assistant", finalResponse, agent.getAgentName());
             agent.updateOutputState(finalResponse);
         }
 
@@ -495,55 +643,24 @@ public class AgentExecutionManager {
     }
 
     /**
-     * 追加消息到会话历史 (用于业务展示)
+     * 追加消息到会话历史 (仅用于 User 输入)
      */
     private void appendMessageToConversationHistory(String conversationId, String role, String content, String senderName) {
-        try {
-            ConversationEntity conversation = conversationRepository.selectOne(
-                    new LambdaQueryWrapper<ConversationEntity>()
-                            .eq(ConversationEntity::getConversationId, conversationId)
-            );
+        ObjectNode messageItem = objectMapper.createObjectNode();
+        messageItem.put("id", UUID.randomUUID().toString());
+        messageItem.put("type", "assistant".equals(role) ? "AgentMessage" : "UserMessage");
+        messageItem.put("sender", senderName);
+        messageItem.put("timestamp", LocalDateTime.now().toString());
 
-            if (conversation == null) {
-                log.warn("会话不存在: conversationId={}", conversationId);
-                return;
-            }
-
-            // 构造展示用的消息格式
-            ObjectNode messageItem = objectMapper.createObjectNode();
-            messageItem.put("type", "message");
-            messageItem.put("role", role);
-            messageItem.put("sender", senderName);
-            messageItem.put("timestamp", LocalDateTime.now().toString());
-
-            ObjectNode contentItem = objectMapper.createObjectNode();
-            contentItem.put("type", "assistant".equals(role) ? "output_text" : "input_text");
-            contentItem.put("text", content);
-            messageItem.set("content", objectMapper.createArrayNode().add(contentItem));
-
-            // 追加到 historyContext
-            String currentHistory = conversation.getHistoryContext();
-            if (currentHistory == null || currentHistory.isEmpty() || "null".equals(currentHistory)) {
-                currentHistory = "[]";
-            }
-
-            JsonNode historyNode = objectMapper.readTree(currentHistory);
-            if (historyNode.isArray()) {
-                ((ArrayNode) historyNode).add(messageItem);
-                conversation.setHistoryContext(objectMapper.writeValueAsString(historyNode));
-
-                conversation.setLastMessageAt(LocalDateTime.now());
-                conversation.setLastMessageType(role);
-                conversation.setLastMessageContent(truncateText(content, 500));
-
-                Integer count = conversation.getMessageCount();
-                conversation.setMessageCount(count != null ? count + 1 : 1);
-
-                conversationRepository.updateById(conversation);
-            }
-        } catch (Exception e) {
-            log.error("追加消息到会话历史失败: conversationId={}", conversationId, e);
-        }
+        ArrayNode contentArray = objectMapper.createArrayNode();
+        ObjectNode textContent = objectMapper.createObjectNode();
+        textContent.put("type", "text");
+        textContent.put("text", content);
+        contentArray.add(textContent);
+        
+        messageItem.set("content", contentArray);
+        
+        appendHistoryItem(conversationId, messageItem);
     }
 
     private String truncateText(String text, int maxLength) {

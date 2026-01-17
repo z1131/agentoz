@@ -212,7 +212,6 @@ public class ConfigProtoConverter {
             }
 
             // http_headers (streamable_http 模式)
-            // 优先匹配标准复数形式 "http_headers"，兼容单数 "http_header"
             JsonNode headersNode = serverConfig.get("http_headers");
 
             if (headersNode != null && headersNode.isObject()) {
