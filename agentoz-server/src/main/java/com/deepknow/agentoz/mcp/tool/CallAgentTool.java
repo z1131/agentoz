@@ -50,7 +50,7 @@ public class CallAgentTool {
             
             // 启动子任务 (直接通过 Manager 执行)
             agentExecutionManager.executeTaskExtended(new AgentExecutionManager.ExecutionContextExtended(
-                    target.getAgentId(), conversationId, task, "assistant", "System", true, null), 
+                    target.getAgentId(), conversationId, task, "assistant", "System", true), 
                     (InternalCodexEvent event) -> {
                         if (event == null) return;
                         event.setSenderName(targetAgentName);

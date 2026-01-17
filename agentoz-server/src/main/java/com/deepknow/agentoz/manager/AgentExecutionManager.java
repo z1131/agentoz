@@ -63,15 +63,15 @@ public class AgentExecutionManager {
 
     public record ExecutionContextExtended(
             String agentId, String conversationId, String userMessage, String role, String senderName,
-            boolean isSubTask, Object contextPlaceholder
+            boolean isSubTask
     ) {
         public ExecutionContextExtended(String agentId, String conversationId, String userMessage, String role, String senderName) {
-            this(agentId, conversationId, userMessage, role, senderName, false, null);
+            this(agentId, conversationId, userMessage, role, senderName, false);
         }
     }
 
     public void executeTask(ExecutionContext context, Consumer<InternalCodexEvent> eventConsumer, Runnable onCompleted, Consumer<Throwable> onError) {
-        executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), context.userMessage(), context.role(), context.senderName(), false, null), eventConsumer, onCompleted, onError);
+        executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), context.userMessage(), context.role(), context.senderName(), false), eventConsumer, onCompleted, onError);
     }
 
     public void broadcastSubTaskEvent(String conversationId, InternalCodexEvent event) {
@@ -117,8 +117,8 @@ public class AgentExecutionManager {
                         
                         if ("item_completed".equals(e.getEventType()) && e.getRawEventJson() != null) {
                             JsonNode toolRes = objectMapper.readTree(e.getRawEventJson()).path("item").path("result");
-                            for (JsonNode contentItem : toolRes.path("content")) {
-                                String text = contentItem.path("text").asText("");
+                            for (JsonNode item : toolRes.path("content")) {
+                                String text = item.path("text").asText("");
                                 if (text.contains("\"id\"") && text.contains("\"status\"")) {
                                     try {
                                         Task t = objectMapper.readValue(text, Task.class);
@@ -141,10 +141,13 @@ public class AgentExecutionManager {
                 @Override
                 public void onCompleted() {
                     if (subTaskCandidate != null) {
-                        if (taskStore instanceof A2AConfig.ObservableTaskStore) {
-                            ((A2AConfig.ObservableTaskStore) taskStore).addTerminalListener(subTaskCandidate.getId(), (finished) -> {
+                        log.info("[A2A] Entering async wait for: {}", subTaskCandidate.getId());
+                        // ⭐ 利用 ObservableStore 接口解决代理和竞争问题
+                        if (taskStore instanceof A2AConfig.A2AObservableStore store) {
+                            store.addTerminalListener(subTaskCandidate.getId(), (finished) -> {
                                 String result = extractResult(finished);
-                                executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "任务结果：\n" + result, "user", "System", false, null), eventConsumer, onCompleted, onError);
+                                log.info("[A2A] Awakened parent from task: {}", finished.getId());
+                                executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "这是委派任务的最终执行结果：\n" + result, "user", "System(A2A)", false), eventConsumer, onCompleted, onError);
                             });
                         }
                     } else {
