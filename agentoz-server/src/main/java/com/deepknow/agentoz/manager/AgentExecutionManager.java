@@ -83,8 +83,8 @@ public class AgentExecutionManager {
      * 持久化 Codex 事件到会话历史
      * 公开方法，供 CallAgentTool 等外部调用
      */
-    public void persistEvent(String conversationId, String senderName, InternalCodexEvent event) {
-        persist(conversationId, senderName, event);
+    public void persistEvent(String conversationId, String agentId, String senderName, InternalCodexEvent event) {
+        persist(conversationId, agentId, senderName, event);
     }
 
     /**
@@ -143,7 +143,7 @@ public class AgentExecutionManager {
                         InternalCodexEvent e = InternalCodexEventConverter.toInternalEvent(p);
                         if (e == null) return;
                         e.setSenderName(agent.getAgentName());
-                        persist(context.conversationId(), agent.getAgentName(), e);
+                        persist(context.conversationId(), agent.getAgentId(), agent.getAgentName(), e);
                         collectTextRobustly(e, sb);
                         
                         if ("item.completed".equals(e.getEventType()) && e.getRawEventJson() != null) {
@@ -266,20 +266,37 @@ public class AgentExecutionManager {
         } catch (Exception ignored) {}
     }
 
-    private void persist(String cid, String sdr, InternalCodexEvent ev) {
+    private void persist(String conversationId, String agentId, String senderName, InternalCodexEvent event) {
         try {
-            if (ev.getEventType() == null || ev.getRawEventJson() == null) return;
-            JsonNode n = objectMapper.readTree(ev.getRawEventJson());
+            if (event.getEventType() == null || event.getRawEventJson() == null) return;
+            JsonNode n = objectMapper.readTree(event.getRawEventJson());
             ObjectNode item = null;
-            if ("agent_message".equals(ev.getEventType())) item = createAgentMsg(sdr, n);
-            else if ("item.completed".equals(ev.getEventType())) item = createToolItem(sdr, n);
-            else if ("agent_reasoning".equals(ev.getEventType())) item = createReasoningItem(sdr, n);
+            if ("agent_message".equals(event.getEventType())) item = createAgentMsg(senderName, n);
+            else if ("item.completed".equals(event.getEventType())) item = createToolItem(senderName, n);
+            else if ("agent_reasoning".equals(event.getEventType())) item = createReasoningItem(senderName, n);
             if (item != null) {
-                appendHistoryItem(cid, item);
-                if (ev.getDisplayItems() == null) ev.setDisplayItems(new java.util.ArrayList<>());
-                ev.getDisplayItems().add(objectMapper.writeValueAsString(item));
+                appendHistoryItem(conversationId, item);
+                appendAgentHistory(agentId, item);
+                if (event.getDisplayItems() == null) event.setDisplayItems(new java.util.ArrayList<>());
+                event.getDisplayItems().add(objectMapper.writeValueAsString(item));
             }
         } catch (Exception ignored) {}
+    }
+
+    private void appendAgentHistory(String agentId, ObjectNode item) {
+        try {
+            AgentEntity agent = agentRepository.selectOne(
+                    new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, agentId)
+            );
+            if (agent == null) return;
+            ArrayNode h = (agent.getFullHistory() == null || agent.getFullHistory().isEmpty() || "null".equals(agent.getFullHistory())) ? objectMapper.createArrayNode() : (ArrayNode) objectMapper.readTree(agent.getFullHistory());
+            h.add(item);
+            agent.setFullHistory(objectMapper.writeValueAsString(h));
+            agentRepository.updateById(agent);
+            log.debug("Agent fullHistory 已更新: agentId={}, items={}", agentId, h.size());
+        } catch (Exception e) {
+            log.warn("更新 Agent fullHistory 失败: agentId={}", agentId, e);
+        }
     }
 
     private ObjectNode createAgentMsg(String s, JsonNode n) {

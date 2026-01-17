@@ -57,7 +57,7 @@ public class CallAgentTool {
                         if (event == null) return;
                         event.setSenderName(targetAgentName);
                         agentExecutionManager.broadcastSubTaskEvent(conversationId, event);
-                        agentExecutionManager.persistEvent(conversationId, targetAgentName, event);
+                        agentExecutionManager.persistEvent(conversationId, target.getAgentId(), targetAgentName, event);
                         collectText(event, res);
                         if (event.getStatus() == InternalCodexEvent.Status.FINISHED
                                 && event.getUpdatedRollout() != null
