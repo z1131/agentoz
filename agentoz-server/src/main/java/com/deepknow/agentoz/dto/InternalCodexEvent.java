@@ -69,6 +69,14 @@ public class InternalCodexEvent {
     private byte[] updatedRollout;
 
     /**
+     * 是否是中间状态（A2A 场景）
+     *
+     * <p>当 true 时，表示这是 updated_rollout_interrupt，表示 Codex 被中断时的状态</p>
+     * <p>用于 A2A 挂起场景，AgentOZ 收到后应该持久化但不关闭流</p>
+     */
+    private boolean intermediateRollout;
+
+    /**
      * 适配器日志（调试用，可忽略）
      */
     private String adapterLog;
