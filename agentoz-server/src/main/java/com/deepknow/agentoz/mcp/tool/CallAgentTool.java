@@ -36,7 +36,10 @@ public class CallAgentTool {
     @Autowired
     private A2ATaskRegistry a2aTaskRegistry;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper()
+            .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+            .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
     public static final String A2A_DELEGATED_MARKER = "[A2A_TASK_DELEGATED:";
 
     @AgentTool(name = "call_agent", description = "异步委派任务")

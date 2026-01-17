@@ -53,7 +53,8 @@ public class AgentExecutionManager {
     private final A2ATaskRegistry a2aTaskRegistry;
 
     private final String websiteUrl = "https://agentoz.deepknow.online";
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper()
+            .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
     public record ExecutionContext(String agentId, String conversationId, String userMessage, String role, String senderName) {}
 

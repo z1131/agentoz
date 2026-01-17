@@ -45,6 +45,12 @@
             <version>0.3.3.Final</version>
         </dependency>
 
+        <!-- ⭐ Support Java 8 Date/Time for Jackson (Required by A2A SDK) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+
 
 
 
