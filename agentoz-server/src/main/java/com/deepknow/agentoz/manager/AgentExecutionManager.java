@@ -276,6 +276,7 @@ public class AgentExecutionManager {
             if ("agent_message".equals(event.getEventType())) item = createAgentMsg(senderName, n);
             else if ("item.completed".equals(event.getEventType())) item = createToolItem(senderName, n);
             else if ("agent_reasoning".equals(event.getEventType())) item = createReasoningItem(senderName, n);
+            else item = createGenericItem(senderName, n, event.getEventType());
             if (item != null) {
                 appendHistoryItem(conversationId, item);
                 appendAgentHistory(agentId, item);
@@ -317,6 +318,10 @@ public class AgentExecutionManager {
     private ObjectNode createReasoningItem(String s, JsonNode n) {
         ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "AgentMessage"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString());
         ArrayNode c = objectMapper.createArrayNode(); ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", "> [Thinking] " + n.path("content").asText("")); c.add(t); i.set("content", c); return i;
+    }
+
+    private ObjectNode createGenericItem(String s, JsonNode n, String eventType) {
+        ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "CodexEvent"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString()); i.put("eventType", eventType); i.set("rawEvent", n); return i;
     }
 
     private void appendHistoryItem(String cid, ObjectNode i) {
