@@ -3,6 +3,7 @@ package com.deepknow.agentoz.manager;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.deepknow.agentoz.api.common.exception.AgentOzErrorCode;
 import com.deepknow.agentoz.api.common.exception.AgentOzException;
+import com.deepknow.agentoz.dto.A2AContext;
 import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.infra.client.CodexAgentClient;
 import com.deepknow.agentoz.infra.converter.grpc.ConfigProtoConverter;
@@ -73,7 +74,7 @@ public class AgentExecutionManager {
     ) {}
 
     /**
-     * 执行任务请求上下文（扩展版 - 支持子任务标识）
+     * 执行任务请求上下文（扩展版 - 支持 A2A 协议上下文）
      */
     public record ExecutionContextExtended(
             String agentId,
@@ -81,10 +82,15 @@ public class AgentExecutionManager {
             String userMessage,
             String role,
             String senderName,
-            boolean isSubTask  // 是否为子任务（通过 call_agent 调用）
+            boolean isSubTask,  // 是否为子任务（保留兼容性）
+            A2AContext a2aContext // ⭐ A2A 协议上下文
     ) {
         public ExecutionContextExtended(String agentId, String conversationId, String userMessage, String role, String senderName) {
-            this(agentId, conversationId, userMessage, role, senderName, false);
+            this(agentId, conversationId, userMessage, role, senderName, false, null);
+        }
+
+        public ExecutionContextExtended(String agentId, String conversationId, String userMessage, String role, String senderName, boolean isSubTask) {
+            this(agentId, conversationId, userMessage, role, senderName, isSubTask, null);
         }
 
         public ExecutionContext toExecutionContext() {
@@ -130,46 +136,54 @@ public class AgentExecutionManager {
             Runnable onCompleted,
             Consumer<Throwable> onError
     ) {
-        String traceInfo = "ConvId=" + context.conversationId();
+        // 1. 初始化或提取 A2A 上下文
+        A2AContext a2aContext = context.a2aContext();
+        if (a2aContext == null) {
+            // 如果没有上下文，说明是根任务，创建一个 (可关联当前业务请求的 TraceId)
+            a2aContext = A2AContext.root(context.agentId(), null);
+        }
+
+        String traceInfo = String.format("ConvId=%s, TraceId=%s, Depth=%d", 
+                context.conversationId(), a2aContext.getTraceId(), a2aContext.getDepth());
+
+        // 2. 判定子任务状态 (基于 A2A 上下文)
+        // 逻辑：如果深度 > 0 或者有父任务 ID，则认为是子任务
+        boolean isSubTask = context.isSubTask() || a2aContext.getDepth() > 0;
 
         try {
-            // 0. 注册会话通道 (仅主任务注册，子任务不注册)
-            // 判断逻辑：如果调用栈中有 CallAgentTool，则认为是子任务
-            boolean isSubTask = context.isSubTask() || isCalledFromCallAgentTool();
-
             if (!isSubTask) {
                 sessionStreamRegistry.register(context.conversationId(), eventConsumer);
-                log.info("[AgentExecutionManager] ✓ 注册主任务流: conversationId={}", context.conversationId());
+                log.info("[AgentExecutionManager] ✓ 注册主任务流: {}", traceInfo);
             } else {
-                log.debug("[AgentExecutionManager] ⊗ 跳过子任务注册: conversationId={}, 来自CallAgentTool",
-                        context.conversationId());
+                log.debug("[AgentExecutionManager] ⊗ 跳过子任务注册: {}, ParentTaskId={}",
+                        traceInfo, a2aContext.getParentTaskId());
             }
 
-            // 1. 路由到目标 Agent
+            // 3. 路由到目标 Agent
             String agentId = resolveAgentId(context);
             log.info("执行任务: agentId={}, {}", agentId, traceInfo);
 
-            // 2. 加载 Agent 和配置
+            // 4. 加载 Agent 和配置
             AgentEntity agent = loadAgent(agentId);
             AgentConfigEntity config = loadConfig(agent.getConfigId());
 
-            // 3. 追加消息到会话历史（用于业务展示）
+            // 5. 追加消息到会话历史
             appendMessageToConversationHistory(
                     context.conversationId(),
-                    context.role(),  // ✅ 使用实际角色（user/assistant），区分用户输入和智能体调用
+                    context.role(),
                     context.userMessage(),
                     context.senderName() != null ? context.senderName() : "user"
             );
 
-            // 4. 记录 Agent 被调用状态
+            // 6. 记录 Agent 被调用状态
             String contextRole = (context.senderName() != null) ? context.senderName() : context.role();
             if (contextRole == null) contextRole = "user";
             agentContextManager.onAgentCalled(agentId, context.userMessage(), contextRole);
 
-            // 5. 动态注入系统级 MCP
-            injectSystemMcp(config, agent.getAgentId(), agent.getConversationId());
+            // 7. 动态注入系统级 MCP 和 A2A 请求头
+            injectSystemMcp(config, agent.getAgentId(), agent.getConversationId(), a2aContext);
 
-            // 6. 获取 Agent 的历史会话状态
+            // 8. 获取 Agent 的历史会话状态
             byte[] historyRollout = agent.getActiveContextBytes();
             log.info("准备调用Codex: agentId={}, model={}, historySize={} bytes",
                     agentId, config.getLlmModel(), historyRollout.length);
@@ -275,7 +289,7 @@ public class AgentExecutionManager {
                         @Override
                         public void onError(Throwable t) {
                             // 只在主任务时注销流
-                            if (!context.isSubTask() && !isCalledFromCallAgentTool()) {
+                            if (!isSubTask) {
                                 sessionStreamRegistry.unregister(context.conversationId());
                             }
                             log.error("Codex 流错误回调触发: {}", traceInfo, t);
@@ -285,7 +299,7 @@ public class AgentExecutionManager {
                         @Override
                         public void onCompleted() {
                             // 只在主任务时注销流
-                            if (!context.isSubTask() && !isCalledFromCallAgentTool()) {
+                            if (!isSubTask) {
                                 sessionStreamRegistry.unregister(context.conversationId());
                             }
                             log.info("Codex 流完成回调触发: {}", traceInfo);
@@ -297,7 +311,7 @@ public class AgentExecutionManager {
 
         } catch (Exception e) {
             // 只在主任务时注销流
-            if (!context.isSubTask() && !isCalledFromCallAgentTool()) {
+            if (!isSubTask) {
                 sessionStreamRegistry.unregister(context.conversationId());
             }
             log.error("执行任务失败: {}", traceInfo, e);
@@ -360,7 +374,7 @@ public class AgentExecutionManager {
     }
 
     /**
-     * 注入系统 MCP 并为所有业务 MCP 注入通用请求头
+     * 注入系统 MCP 并为所有业务 MCP 注入通用请求头 (包括 A2A 协议头)
      * 
      * <p>职责划分：</p>
      * <ul>
@@ -368,7 +382,7 @@ public class AgentExecutionManager {
      *   <li>AgentOz：注入运行时上下文（agentId, conversationId）到所有 MCP</li>
      * </ul>
      */
-    private void injectSystemMcp(AgentConfigEntity config, String agentId, String conversationId) {
+    private void injectSystemMcp(AgentConfigEntity config, String agentId, String conversationId, A2AContext a2aContext) {
         try {
             String originalJson = config.getMcpConfigJson();
             
@@ -386,7 +400,7 @@ public class AgentExecutionManager {
                 mcpRoot = (ObjectNode) rootNode.get("mcp_servers");
             }
 
-            // 2. 为所有已有的业务 MCP 注入通用请求头
+            // 2. 为所有已有的业务 MCP 注入通用请求头和 A2A 请求头
             final ObjectNode finalMcpRoot = mcpRoot;
             java.util.List<String> mcpNames = new java.util.ArrayList<>();
             mcpRoot.fieldNames().forEachRemaining(mcpNames::add);
@@ -398,13 +412,20 @@ public class AgentExecutionManager {
                             ? (ObjectNode) mcpNode.get("http_headers")
                             : objectMapper.createObjectNode();
                     
-                    // 注入通用请求头（不覆盖已有的值）
-                    if (!headers.has("X-Agent-ID")) {
-                        headers.put("X-Agent-ID", agentId);
+                    // 注入 AgentOz 基础请求头
+                    headers.put("X-Agent-ID", agentId);
+                    headers.put("X-Conversation-ID", conversationId);
+
+                    // ⭐ 注入 A2A 协议请求头 (用于全链路任务追踪)
+                    if (a2aContext != null) {
+                        headers.put("X-A2A-Trace-ID", a2aContext.getTraceId());
+                        if (a2aContext.getParentTaskId() != null) {
+                            headers.put("X-A2A-Parent-Task-ID", a2aContext.getParentTaskId());
+                        }
+                        headers.put("X-A2A-Depth", String.valueOf(a2aContext.getDepth()));
+                        headers.put("X-A2A-Origin-Agent-ID", a2aContext.getOriginAgentId());
                     }
-                    if (!headers.has("X-Conversation-ID")) {
-                        headers.put("X-Conversation-ID", conversationId);
-                    }
+
                     mcpNode.set("http_headers", headers);
                 }
             }
@@ -418,12 +439,20 @@ public class AgentExecutionManager {
             sysHeaders.put("Authorization", "Bearer " + token);
             sysHeaders.put("X-Agent-ID", agentId);
             sysHeaders.put("X-Conversation-ID", conversationId);
+
+            // 系统 MCP 同样携带 A2A 头
+            if (a2aContext != null) {
+                sysHeaders.put("X-A2A-Trace-ID", a2aContext.getTraceId());
+                sysHeaders.put("X-A2A-Depth", String.valueOf(a2aContext.getDepth()));
+            }
+
             sysMcpConfig.set("http_headers", sysHeaders);
             mcpRoot.set("agentoz_system", sysMcpConfig);
             
             config.setMcpConfigJson(objectMapper.writeValueAsString(rootNode));
-            log.info("注入系统 MCP 完成: agentId={}, conversationId={}, mcpCount={}", 
-                    agentId, conversationId, mcpRoot.size());
+            log.info("注入系统 MCP 和 A2A 协议头完成: TraceId={}, Depth={}", 
+                    a2aContext != null ? a2aContext.getTraceId() : "none",
+                    a2aContext != null ? a2aContext.getDepth() : 0);
         } catch (Exception e) {
             log.error("注入系统MCP失败", e);
         }
@@ -659,23 +688,5 @@ public class AgentExecutionManager {
     private String truncateText(String text, int maxLength) {
         if (text == null) return null;
         return text.length() <= maxLength ? text : text.substring(0, maxLength) + "...";
-    }
-
-    /**
-     * 检测当前调用是否来自 CallAgentTool
-     * 通过检查调用栈判断是否为子任务调用
-     */
-    private boolean isCalledFromCallAgentTool() {
-        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-        for (StackTraceElement element : stackTrace) {
-            String className = element.getClassName();
-            // 检查调用栈中是否有 CallAgentTool
-            if (className.contains("CallAgentTool") &&
-                !className.contains("AgentExecutionManager")) {
-                log.debug("[AgentExecutionManager] 检测到来自 CallAgentTool 的调用");
-                return true;
-            }
-        }
-        return false;
     }
 }

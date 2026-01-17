@@ -1,9 +1,9 @@
 package com.deepknow.agentoz.mcp.tool;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.deepknow.agentoz.api.dto.ExecuteTaskRequest;
 import com.deepknow.agentoz.api.dto.TaskResponse;
+import com.deepknow.agentoz.dto.A2AContext;
 import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.manager.AgentExecutionManager;
@@ -48,43 +48,39 @@ public class CallAgentTool {
             log.info("[CallAgent] 开始处理调用请求, targetAgentName={}, task={}",
                     targetAgentName, task);
 
-            // 1. 从 MCP Transport Context 获取会话信息和身份信息
+            // 1. 从 MCP Transport Context 获取会话信息和 A2A 上下文
             String sourceAgentId = "unknown";
             String sourceAgentName = "Assistant";
             String conversationId = null;
+            
+            // A2A 上下文相关
+            String traceId = null;
+            int currentDepth = 0;
+            String originAgentId = null;
 
             if (ctx != null) {
-                // 调试日志：检查关键请求头是否存在（支持大小写不敏感）
-                boolean hasConvId = ctx.get("X-Conversation-ID") != null || ctx.get("x-conversation-id") != null;
-                boolean hasAgentId = ctx.get("X-Agent-ID") != null || ctx.get("x-agent-id") != null;
-                boolean hasAuth = ctx.get("Authorization") != null || ctx.get("authorization") != null;
-                log.info("[CallAgent] MCP Transport Context 检查 - " +
-                        "X-Conversation-ID: {}, X-Agent-ID: {}, Authorization: {}",
-                        hasConvId, hasAgentId, hasAuth);
-
-                // 从 X-Conversation-ID 请求头获取会话ID（支持大小写不敏感）
-                Object convId = ctx.get("X-Conversation-ID");
-                if (convId == null) convId = ctx.get("x-conversation-id");
-
-                if (convId != null) {
-                    conversationId = convId.toString();
-                    log.info("[CallAgent] ✓ 从 X-Conversation-ID 请求头获取会话ID: {}", conversationId);
-                } else {
-                    log.warn("[CallAgent] ✗ 未找到 X-Conversation-ID 请求头");
+                // 从请求头获取会话和 A2A 信息（支持大小写不敏感）
+                conversationId = getHeader(ctx, "X-Conversation-ID");
+                sourceAgentId = getHeader(ctx, "X-Agent-ID");
+                
+                // ⭐ 提取 A2A 协议头
+                traceId = getHeader(ctx, "X-A2A-Trace-ID");
+                originAgentId = getHeader(ctx, "X-A2A-Origin-Agent-ID");
+                String depthStr = getHeader(ctx, "X-A2A-Depth");
+                if (depthStr != null) {
+                    try {
+                        currentDepth = Integer.parseInt(depthStr);
+                    } catch (NumberFormatException ignored) {}
                 }
 
-                // 从 X-Agent-ID 请求头获取 Agent ID（支持大小写不敏感）
-                Object agentId = ctx.get("X-Agent-ID");
-                if (agentId == null) agentId = ctx.get("x-agent-id");
+                log.info("[CallAgent] 提取 A2A 上下文 - TraceId: {}, Depth: {}, OriginAgent: {}",
+                        traceId, currentDepth, originAgentId);
+            }
 
-                if (agentId != null) {
-                    sourceAgentId = agentId.toString();
-                    log.info("[CallAgent] ✓ 从 X-Agent-ID 请求头获取 AgentID: {}", sourceAgentId);
-                } else {
-                    log.warn("[CallAgent] ✗ 未找到 X-Agent-ID 请求头");
-                }
-            } else {
-                log.error("[CallAgent] ✗ MCP Transport Context 为空");
+            // 2. 递归深度检查 (死循环防护)
+            if (currentDepth >= 5) {
+                log.error("[CallAgent] ✗ 触发递归深度限制: depth={}", currentDepth);
+                return "Error: 任务嵌套层次太深（已达到5层），为了系统安全已拦截调用。请检查是否存在 Agent 间的循环调用。";
             }
 
             // 查找发送者名称
@@ -93,35 +89,19 @@ public class CallAgentTool {
                     AgentEntity sourceAgent = agentRepository.selectOne(
                             new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, sourceAgentId)
                     );
-
                     if (sourceAgent != null) {
                         sourceAgentName = sourceAgent.getAgentName();
-                        log.info("[CallAgent] ✓ 查找到发送者名称: {}", sourceAgentName);
-                    } else {
-                        log.warn("[CallAgent] ✗ 未找到 AgentID={} 对应的 Agent 记录", sourceAgentId);
                     }
                 } catch (Exception e) {
-                    log.warn("[CallAgent] ✗ 查找发送者名称失败: {}", e.getMessage());
+                    log.warn("[CallAgent] 查找发送者名称失败: {}", e.getMessage());
                 }
             }
 
             // 验证会话ID
             if (conversationId == null) {
                 log.error("[CallAgent] ✗ 无法获取会话ID，调用失败");
-                String debugInfo = "Error: 无法获取当前会话ID。\n" +
-                       "调试信息:\n" +
-                       "- MCP Transport Context: " + (ctx != null ? "存在" : "为空") + "\n";
-                if (ctx != null) {
-                    debugInfo += String.format("- X-Conversation-ID: %s\n", ctx.get("X-Conversation-ID") != null ? "存在" : "缺失");
-                    debugInfo += String.format("- X-Agent-ID: %s\n", ctx.get("X-Agent-ID") != null ? "存在" : "缺失");
-                    debugInfo += String.format("- Authorization: %s\n", ctx.get("Authorization") != null ? "存在" : "缺失");
-                }
-                debugInfo += "请确保 AgentExecutionManager 为 MCP 配置注入了 X-Conversation-ID 请求头。";
-                return debugInfo;
+                return "Error: 无法获取当前会话ID，请联系管理员检查系统配置。";
             }
-
-            log.info("[CallAgent] ✓ 验证通过 - Source[{}({})] -> TargetName[{}], ConvId={}",
-                    sourceAgentName, sourceAgentId, targetAgentName, conversationId);
 
             // 3. 解析目标 Agent ID (Name -> ID)
             AgentEntity targetAgent = agentRepository.selectOne(
@@ -142,9 +122,18 @@ public class CallAgentTool {
                 finalMessage = String.format("%s\n\n[Context]\n%s", task, context);
             }
 
-            // 5. 构建执行请求上下文
-            log.info("[CallAgent] → 开始本地调用 AgentExecutionManager, TargetAgentId={}, Message={}",
-                    targetAgentId, finalMessage);
+            // 5. ⭐ 构建子任务 A2A 上下文
+            A2AContext parentA2aContext = A2AContext.builder()
+                    .traceId(traceId != null ? traceId : java.util.UUID.randomUUID().toString())
+                    .depth(currentDepth)
+                    .originAgentId(originAgentId != null ? originAgentId : sourceAgentId)
+                    .build();
+            
+            // 派生下一级上下文
+            A2AContext childA2aContext = parentA2aContext.next(sourceAgentId);
+
+            log.info("[CallAgent] → 发起委派: Source[{}] -> Target[{}], TraceId={}, NewDepth={}",
+                    sourceAgentName, targetAgentName, childA2aContext.getTraceId(), childA2aContext.getDepth());
 
             final String currentConversationId = conversationId;
             final String finalTargetAgentName = targetAgentName;
@@ -152,8 +141,7 @@ public class CallAgentTool {
             CompletableFuture<String> resultFuture = new CompletableFuture<>();
             final StringBuilder fullResponse = new StringBuilder();
 
-            // 6. 本地异步调用执行管理器 (不走 Dubbo RPC)
-            // 使用 ExecutionContextExtended 标记为子任务
+            // 6. 执行子任务
             AgentExecutionManager.ExecutionContextExtended executionContext =
                     new AgentExecutionManager.ExecutionContextExtended(
                             targetAgentId,
@@ -161,59 +149,55 @@ public class CallAgentTool {
                             finalMessage,
                             "assistant",
                             sourceAgentName,
-                            true  // ⭐ 标记为子任务，避免注册到 SessionStreamRegistry
+                            true,
+                            childA2aContext // ⭐ 显式传递 A2A 上下文
                     );
 
             agentExecutionManager.executeTaskExtended(
                     executionContext,
-                    // 事件回调 (InternalCodexEvent)
                     (InternalCodexEvent event) -> {
                         if (event == null) return;
-
-                        // 1. 广播流式事件给主会话 (实时透传)
                         try {
-                            // 设置发送者名称（不修改原始 JSON，避免 StackOverflow）
                             event.setSenderName(finalTargetAgentName);
                             sessionStreamRegistry.broadcast(currentConversationId, event);
                         } catch (Exception e) {
                             log.warn("[CallAgent] 广播子任务事件失败: {}", e.getMessage());
                         }
 
-                        // 2. 收集最终文本结果 (用于返回给主智能体)
-                        // 使用 TaskResponseConverter 的逻辑提取文本
                         TaskResponse respDto = TaskResponseConverter.toTaskResponse(event);
                         if (respDto != null && respDto.getTextDelta() != null) {
                             fullResponse.append(respDto.getTextDelta());
                         } else if (respDto != null && respDto.getFinalResponse() != null) {
-                            // 某些情况下会有最终回复
                             fullResponse.setLength(0);
                             fullResponse.append(respDto.getFinalResponse());
                         }
                     },
-                    // 完成回调
                     () -> {
-                        log.info("[CallAgent] ✓ 本地调用完成, 总长度: {}", fullResponse.length());
+                        log.info("[CallAgent] ✓ 委派任务完成: {}", childA2aContext.getTraceId());
                         resultFuture.complete(fullResponse.toString());
                     },
-                    // 错误回调
                     (Throwable throwable) -> {
-                        log.error("[CallAgent] ✗ 本地调用异常", throwable);
+                        log.error("[CallAgent] ✗ 委派任务异常", throwable);
                         resultFuture.completeExceptionally(throwable);
                     }
             );
 
-            log.info("[CallAgent] → executeTask 本地任务已启动, 等待结果...");
-
-            // 7. 等待结果 (最多30分钟)
+            // 7. 等待结果 (临时保留阻塞，等第三阶段实现完全异步)
             String result = resultFuture.get(30, TimeUnit.MINUTES);
-            log.info("[CallAgent] ✓ 最终结果长度: {}, 内容预览: {}",
-                    result.length(), result.isEmpty() ? "(空)" : result.substring(0, Math.min(100, result.length())));
             return result;
 
         } catch (Exception e) {
             log.error("CallAgent 工具执行异常", e);
             return "Error: 工具执行失败 - " + e.getMessage();
         }
+    }
+
+    private String getHeader(McpTransportContext ctx, String headerName) {
+        Object val = ctx.get(headerName);
+        if (val == null) {
+            val = ctx.get(headerName.toLowerCase());
+        }
+        return val != null ? val.toString() : null;
     }
 
     private String extractTokenFromMap(java.util.Map<?, ?> map) {
