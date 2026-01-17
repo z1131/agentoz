@@ -174,8 +174,24 @@ public class AgentExecutionManager {
             log.info("准备调用Codex: agentId={}, model={}, historySize={} bytes",
                     agentId, config.getLlmModel(), historyRollout.length);
 
-                // 7. 构建 Codex 请求
-                SessionConfig sessionConfig = ConfigProtoConverter.toSessionConfig(config);
+                // 7. 🔧 关键修复：有历史记录时不传指令配置
+                // 原因：如果传了指令，codex-agent会重新添加initial_context，
+                //      导致第二轮对话时base_instructions_override为空，
+                //      降级使用model.base_instructions（"codex cli"默认人设）
+                boolean hasHistory = (historyRollout != null && historyRollout.length > 0);
+
+                SessionConfig sessionConfig;
+
+                if (hasHistory) {
+                    // 有历史记录，发送仅模型配置（不含指令）
+                    // 这样codex会从rollout中恢复指令，不会使用默认人设
+                    log.info("⏩ 检测到历史记录，发送仅模型配置（不含指令）: agentId={}", agentId);
+                    sessionConfig = ConfigProtoConverter.toModelOnlyConfig(config);
+                } else {
+                    // 首次调用，发送完整配置
+                    log.info("✨ 首次调用，发送完整配置: agentId={}", agentId);
+                    sessionConfig = ConfigProtoConverter.toSessionConfig(config);
+                }
 
                 // 7.0 打印 MCP 服务器配置（调试用）
                 log.info("[DEBUG] MCP Servers 配置: count={}, servers={}",
