@@ -52,6 +52,7 @@ public class CallAgentTool {
             String conversationId = getHeader(ctx, "X-Conversation-ID");
             String traceId = getHeader(ctx, "X-A2A-Trace-ID");
             String originAgentId = getHeader(ctx, "X-A2A-Origin-Agent-ID");
+            String parentTaskIdFromHeader = getHeader(ctx, "X-A2A-Parent-Task-ID");
             int currentDepth = 0;
             String depthStr = getHeader(ctx, "X-A2A-Depth");
             if (depthStr != null) {
@@ -83,10 +84,13 @@ public class CallAgentTool {
             // 4. 构建 A2A 上下文接力
             A2AContext parentA2aContext = A2AContext.builder()
                     .traceId(traceId != null ? traceId : UUID.randomUUID().toString())
+                    .parentTaskId(parentTaskIdFromHeader)
                     .depth(currentDepth)
                     .originAgentId(originAgentId != null ? originAgentId : sourceAgentId)
                     .build();
-            A2AContext childA2aContext = parentA2aContext.next(sourceAgentId);
+            
+            // 派生下一级：使用 header 里的 parentTaskId 确保溯源链条不断
+            A2AContext childA2aContext = parentA2aContext.next(parentTaskIdFromHeader != null ? parentTaskIdFromHeader : sourceAgentId);
 
             // 6. 注册任务并启动执行
             final CompletableFuture<String> resultFuture = new CompletableFuture<>();

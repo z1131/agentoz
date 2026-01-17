@@ -184,7 +184,7 @@ public class AgentExecutionManager {
             agentContextManager.onAgentCalled(agentId, context.userMessage(), contextRole);
 
             // 6. 注入系统级 MCP 和 A2A 请求头
-            injectSystemMcp(config, agent.getAgentId(), agent.getConversationId(), a2aContext);
+            injectSystemMcp(config, agent.getAgentId(), agent.getConversationId(), a2aContext, currentTaskId);
 
             // 7. 构建 Codex 请求
             byte[] historyRollout = agent.getActiveContextBytes();
@@ -278,7 +278,7 @@ public class AgentExecutionManager {
         return config;
     }
 
-    private void injectSystemMcp(AgentConfigEntity config, String agentId, String conversationId, A2AContext a2aContext) {
+    private void injectSystemMcp(AgentConfigEntity config, String agentId, String conversationId, A2AContext a2aContext, String currentTaskId) {
         try {
             String originalJson = config.getMcpConfigJson();
             ObjectNode rootNode = (originalJson == null || originalJson.trim().isEmpty()) ? objectMapper.createObjectNode() : (ObjectNode) objectMapper.readTree(originalJson);
@@ -290,9 +290,11 @@ public class AgentExecutionManager {
                     ObjectNode headers = ((ObjectNode) mcpConfig).has("http_headers") ? (ObjectNode) ((ObjectNode) mcpConfig).get("http_headers") : objectMapper.createObjectNode();
                     headers.put("X-Agent-ID", agentId);
                     headers.put("X-Conversation-ID", conversationId);
+                    
                     if (a2aContext != null) {
                         headers.put("X-A2A-Trace-ID", a2aContext.getTraceId());
-                        if (a2aContext.getParentTaskId() != null) headers.put("X-A2A-Parent-Task-ID", a2aContext.getParentTaskId());
+                        // ⭐ 关键修正：将当前的 TaskID 注入为子任务的父 ID
+                        headers.put("X-A2A-Parent-Task-ID", currentTaskId);
                         headers.put("X-A2A-Depth", String.valueOf(a2aContext.getDepth()));
                         headers.put("X-A2A-Origin-Agent-ID", a2aContext.getOriginAgentId());
                     }
