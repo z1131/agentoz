@@ -7,6 +7,7 @@ import com.deepknow.agentoz.manager.AgentExecutionManager;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.starter.annotation.AgentParam;
 import com.deepknow.agentoz.starter.annotation.AgentTool;
+import io.a2a.server.tasks.TaskStore;
 import io.a2a.spec.*;
 import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.extern.slf4j.Slf4j;
@@ -19,8 +20,6 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.List;
 import java.util.Collections;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
@@ -30,85 +29,67 @@ public class CallAgentTool {
     private AgentExecutionManager agentExecutionManager;
     @Autowired
     private AgentRepository agentRepository;
+    @Autowired
+    private TaskStore taskStore;
 
     private final ObjectMapper objectMapper = new ObjectMapper()
-            .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+            .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+            .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     public static final String A2A_DELEGATED_MARKER = "[A2A_TASK_DELEGATED:";
 
-    @AgentTool(name = "call_agent", description = "委派任务给另一个智能体")
+    @AgentTool(name = "call_agent", description = "异步委派任务")
     public String callAgent(
             McpTransportContext ctx,
-            @AgentParam(name = "targetAgentName", value = "目标名称") String targetAgentName,
+            @AgentParam(name = "targetAgentName", value = "目标智能体") String targetAgentName,
             @AgentParam(name = "task", value = "指令") String task
     ) {
+        String subId = UUID.randomUUID().toString();
         try {
             String conversationId = getHeader(ctx, "X-Conversation-ID");
             AgentEntity target = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getConversationId, conversationId).eq(AgentEntity::getAgentName, targetAgentName));
             if (target == null) return "Error: Target not found";
 
-            final CompletableFuture<String> resultFuture = new CompletableFuture<>();
-            final StringBuilder resAccumulator = new StringBuilder();
-
+            final StringBuilder res = new StringBuilder();
             agentExecutionManager.executeTaskExtended(new AgentExecutionManager.ExecutionContextExtended(
                     target.getAgentId(), conversationId, task, "assistant", "System", true), 
                     (InternalCodexEvent event) -> {
                         if (event == null) return;
                         event.setSenderName(targetAgentName);
                         agentExecutionManager.broadcastSubTaskEvent(conversationId, event);
-                        // ⭐ 核心：全路径抓取文本
-                        extractTextRobustly(event, resAccumulator);
+                        collectText(event, res);
                     }, 
                     () -> {
-                        String finalResult = resAccumulator.toString().trim();
-                        log.info("[CallAgent] Subtask completed. Content length: {}", finalResult.length());
-                        resultFuture.complete(finalResult);
+                        Artifact art = new Artifact(UUID.randomUUID().toString(), "Result", null, List.of(new TextPart(res.toString())), Collections.emptyMap(), Collections.emptyList());
+                        Task completed = new Task(subId, conversationId, new TaskStatus(TaskState.COMPLETED, null, OffsetDateTime.now()), List.of(art), Collections.emptyList(), Collections.emptyMap());
+                        taskStore.save(completed);
                     }, 
                     (Throwable t) -> {
-                        resultFuture.completeExceptionally(t);
+                        Task failed = new Task(subId, conversationId, new TaskStatus(TaskState.FAILED, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
+                        taskStore.save(failed);
                     });
 
-            return resultFuture.get(55, TimeUnit.SECONDS);
+            Task initial = new Task(subId, conversationId, new TaskStatus(TaskState.SUBMITTED, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
+            return objectMapper.writeValueAsString(initial);
         } catch (Exception e) {
-            log.error("CallAgent error", e);
             return "Error: " + e.getMessage();
         }
     }
 
-    /**
-     * 鲁棒的文本提取：不管是 delta, agent_message 还是 item.completed，只要有文字就抓出来
-     */
-    private void extractTextRobustly(InternalCodexEvent event, StringBuilder accumulator) {
+    private void collectText(InternalCodexEvent event, StringBuilder builder) {
         try {
             String json = event.getRawEventJson();
             if (json == null) return;
             JsonNode node = objectMapper.readTree(json);
-            
-            // 1. 抓取 item.text (针对 item.completed 事件)
             String itemText = node.path("item").path("text").asText("");
-            if (!itemText.isEmpty() && accumulator.indexOf(itemText) == -1) {
-                accumulator.append(itemText);
-                return;
-            }
-
-            // 2. 抓取 delta.text (针对增量事件)
+            if (!itemText.isEmpty() && builder.indexOf(itemText) == -1) { builder.append(itemText); return; }
             String deltaText = node.path("delta").path("text").asText("");
-            if (!deltaText.isEmpty()) {
-                accumulator.append(deltaText);
-                return;
-            }
-
-            // 3. 抓取 content 数组 (针对 OpenAI 风格全量事件)
+            if (!deltaText.isEmpty()) { builder.append(deltaText); return; }
             JsonNode content = node.path("content");
             if (content.isArray()) {
                 StringBuilder sb = new StringBuilder();
-                for (JsonNode part : content) {
-                    if (part.has("text")) sb.append(part.get("text").asText());
-                }
-                if (sb.length() > accumulator.length()) {
-                    accumulator.setLength(0);
-                    accumulator.append(sb);
-                }
+                for (JsonNode part : content) if (part.has("text")) sb.append(part.get("text").asText());
+                if (sb.length() > builder.length()) { builder.setLength(0); builder.append(sb); }
             }
         } catch (Exception ignored) {}
     }
