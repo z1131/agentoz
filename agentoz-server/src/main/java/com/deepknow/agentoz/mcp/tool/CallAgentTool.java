@@ -7,7 +7,6 @@ import com.deepknow.agentoz.manager.AgentExecutionManager;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.starter.annotation.AgentParam;
 import com.deepknow.agentoz.starter.annotation.AgentTool;
-import io.a2a.server.tasks.TaskStore;
 import io.a2a.spec.*;
 import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +18,8 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.List;
 import java.util.Collections;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
@@ -28,52 +29,59 @@ public class CallAgentTool {
     private AgentExecutionManager agentExecutionManager;
     @Autowired
     private AgentRepository agentRepository;
-    @Autowired
-    private TaskStore taskStore;
 
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
-    @AgentTool(name = "call_agent", description = "正统 A2A 异步任务委派")
+    @AgentTool(name = "call_agent", description = "委派任务给另一个智能体并等待其完成。")
     public String callAgent(
             McpTransportContext ctx,
-            @AgentParam(name = "targetAgentName", value = "目标智能体") String targetAgentName,
+            @AgentParam(name = "targetAgentName", value = "目标智能体名称") String targetAgentName,
             @AgentParam(name = "task", value = "任务指令") String task
     ) {
-        String subId = UUID.randomUUID().toString();
         try {
             String conversationId = getHeader(ctx, "X-Conversation-ID");
             AgentEntity target = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getConversationId, conversationId).eq(AgentEntity::getAgentName, targetAgentName));
-            if (target == null) return "Error: Target not found";
+            if (target == null) return "Error: Target agent not found";
 
+            final CompletableFuture<String> resultFuture = new CompletableFuture<>();
             final StringBuilder resAccumulator = new StringBuilder();
             
-            // 启动子任务 (直接通过 Manager 执行)
+            log.info("[CallAgent] 🔄 Starting synchronous delegation (waiting up to 55s): {} -> {}", "System", targetAgentName);
+
+            // 启动子任务
             agentExecutionManager.executeTaskExtended(new AgentExecutionManager.ExecutionContextExtended(
                     target.getAgentId(), conversationId, task, "assistant", "System", true), 
                     (InternalCodexEvent event) -> {
                         if (event == null) return;
                         event.setSenderName(targetAgentName);
-                        // 流式透传 (模拟 A2A Event 路由)
+                        // 实时透传事件给前端流
                         agentExecutionManager.broadcastSubTaskEvent(conversationId, event);
                         collectText(event, resAccumulator);
                     }, 
                     () -> {
-                        // 子任务完成：更新 TaskStore
-                        Task completed = new Task(subId, conversationId, new TaskStatus(TaskState.COMPLETED, null, OffsetDateTime.now()), 
-                                List.of(new Artifact(UUID.randomUUID().toString(), "Result", null, List.of(new TextPart(resAccumulator.toString())), Collections.emptyMap(), Collections.emptyList())), 
-                                Collections.emptyList(), Collections.emptyMap());
-                        taskStore.save(completed);
+                        // 子任务完成：唤醒当前线程
+                        resultFuture.complete(resAccumulator.toString());
                     }, 
                     (Throwable t) -> {
-                        Task failed = new Task(subId, conversationId, new TaskStatus(TaskState.FAILED, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
-                        taskStore.save(failed);
+                        resultFuture.completeExceptionally(t);
                     });
 
-            // 正统返回：初始 Task 状态
-            Task initialTask = new Task(subId, conversationId, new TaskStatus(TaskState.SUBMITTED, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
-            return objectMapper.writeValueAsString(initialTask);
+            // ⭐ 核心逻辑：挂起当前 Java 线程，等待子智能体结果 (Codex 60s 超时防护)
+            String result = resultFuture.get(55, TimeUnit.SECONDS);
+            
+            if (result == null || result.isBlank()) {
+                return "子智能体已完成，但未返回任何内容。";
+            }
+            
+            log.info("[CallAgent] ✅ Result received, returning to caller LLM.");
+            return result;
+
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("[CallAgent] ⚠️ Delegation timed out at 55s.");
+            return "任务正在处理中，由于耗时较长，请稍后再次确认进度。";
         } catch (Exception e) {
+            log.error("CallAgent execution fail", e);
             return "Error: " + e.getMessage();
         }
     }

@@ -115,15 +115,19 @@ public class AgentExecutionManager {
                         persist(context.conversationId(), agent.getAgentName(), e);
                         collect(e, sb);
                         
-                        if ("item_completed".equals(e.getEventType()) && e.getRawEventJson() != null) {
+                        // ⭐ 修正事件类型为 item.completed
+                        if ("item.completed".equals(e.getEventType()) && e.getRawEventJson() != null) {
                             JsonNode toolRes = objectMapper.readTree(e.getRawEventJson()).path("item").path("result");
-                            for (JsonNode item : toolRes.path("content")) {
-                                String text = item.path("text").asText("");
-                                if (text.contains("\"id\"") && text.contains("\"status\"")) {
-                                    try {
-                                        Task t = objectMapper.readValue(text, Task.class);
-                                        if (t.getId() != null) subTaskCandidate = t;
-                                    } catch (Exception ignored) {}
+                            JsonNode contentArr = toolRes.path("content");
+                            if (contentArr.isArray()) {
+                                for (JsonNode item : contentArr) {
+                                    String text = item.path("text").asText("");
+                                    if (text.contains("\"id\"") && text.contains("\"status\"")) {
+                                        try {
+                                            Task t = objectMapper.readValue(text, Task.class);
+                                            if (t.getId() != null) subTaskCandidate = t;
+                                        } catch (Exception ignored) {}
+                                    }
                                 }
                             }
                         }
@@ -141,12 +145,9 @@ public class AgentExecutionManager {
                 @Override
                 public void onCompleted() {
                     if (subTaskCandidate != null) {
-                        log.info("[A2A] Entering async wait for: {}", subTaskCandidate.getId());
-                        // ⭐ 利用 ObservableStore 接口解决代理和竞争问题
                         if (taskStore instanceof A2AConfig.A2AObservableStore store) {
                             store.addTerminalListener(subTaskCandidate.getId(), (finished) -> {
                                 String result = extractResult(finished);
-                                log.info("[A2A] Awakened parent from task: {}", finished.getId());
                                 executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "这是委派任务的最终执行结果：\n" + result, "user", "System(A2A)", false), eventConsumer, onCompleted, onError);
                             });
                         }
