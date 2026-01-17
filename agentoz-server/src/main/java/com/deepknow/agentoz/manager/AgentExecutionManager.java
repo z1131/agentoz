@@ -184,9 +184,21 @@ public class AgentExecutionManager {
                     if (taskStore instanceof A2AConfig.A2AObservableStore store) {
                         store.addTerminalListener(taskId, (finished) -> {
                             String result = extractResult(finished);
-                            executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "委派任务执行完毕，结果如下：\n" + result, "user", "System(A2A)", false), eventConsumer, onCompleted, onError);
+                            log.info("[A2A] 委派任务完成，发送结果事件: conversationId={}, taskId={}", context.conversationId(), taskId);
+                            InternalCodexEvent resultEvent = createResultEvent(result, context.conversationId());
+                            eventConsumer.accept(resultEvent);
                         });
                     }
+                }
+
+                private InternalCodexEvent createResultEvent(String result, String conversationId) {
+                    String escapedResult = result.replace("\"", "\\\"").replace("\n", "\\n");
+                    String rawJson = String.format(
+                        "{\"type\":\"a2a_delegation_completed\",\"conversationId\":\"%s\",\"content\":{\"text\":\"%s\"}}",
+                        conversationId, escapedResult
+                    );
+                    return InternalCodexEvent.processing("a2a_delegation_completed", rawJson)
+                            .setSenderName("System(A2A)");
                 }
             });
         } catch (Exception e) { log.error("Execution error", e); onError.accept(e); }
