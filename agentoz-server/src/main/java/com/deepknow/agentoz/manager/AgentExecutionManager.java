@@ -22,8 +22,6 @@ import codex.agent.SessionConfig;
 import io.a2a.spec.Task;
 import io.a2a.spec.TaskState;
 import io.a2a.spec.TaskStatus;
-import io.a2a.spec.Message;
-import io.a2a.spec.TextPart;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -35,9 +33,11 @@ import org.apache.dubbo.common.stream.StreamObserver;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.List;
+import java.util.Collections;
 
 @Slf4j
 @Component
@@ -80,16 +80,17 @@ public class AgentExecutionManager {
         final String curTask = (a2a.getDepth() == 0) ? context.conversationId() : UUID.randomUUID().toString();
 
         try {
-            // 注册初始任务
+            AgentEntity agent = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, resolveAgentId(context)));
+            AgentConfigEntity config = agentConfigRepository.selectOne(new LambdaQueryWrapper<AgentConfigEntity>().eq(AgentConfigEntity::getConfigId, agent.getConfigId()));
+
+            // 注册初始任务 (官方规范：全量构造)
+            Task initialT = new Task(curTask, context.conversationId(), new TaskStatus(TaskState.WORKING, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
             a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
-                    .task(Task.builder().id(curTask).contextId(context.conversationId()).status(new TaskStatus(TaskState.WORKING)).build())
+                    .task(initialT)
                     .conversationId(context.conversationId())
                     .eventConsumer(eventConsumer)
                     .startTime(System.currentTimeMillis())
                     .build());
-
-            AgentEntity agent = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, resolveAgentId(context)));
-            AgentConfigEntity config = agentConfigRepository.selectOne(new LambdaQueryWrapper<AgentConfigEntity>().eq(AgentConfigEntity::getConfigId, agent.getConfigId()));
 
             appendMessage(context.conversationId(), context.role(), context.userMessage(), (context.senderName() != null) ? context.senderName() : "user");
             agentContextManager.onAgentCalled(agent.getAgentId(), context.userMessage(), (context.senderName() != null) ? context.senderName() : "user");
@@ -103,7 +104,7 @@ public class AgentExecutionManager {
 
             final StringBuilder sb = new StringBuilder();
             codexAgentClient.runTask(agent.getConversationId(), req, new StreamObserver<codex.agent.RunTaskResponse>() {
-                private Task subTask = null;
+                private Task subTaskResult = null;
                 @Override
                 public void onNext(codex.agent.RunTaskResponse p) {
                     try {
@@ -119,8 +120,9 @@ public class AgentExecutionManager {
                                 String text = contentItem.path("text").asText("");
                                 if (text.contains("\"id\"") && text.contains("\"status\"")) {
                                     try {
-                                        Task t = objectMapper.readValue(text, Task.class);
-                                        if (t.id() != null) { subTask = t; }
+                                        Task potential = objectMapper.readValue(text, Task.class);
+                                        // 官方规范：Task 使用 getId()
+                                        if (potential.getId() != null) { subTaskResult = potential; }
                                     } catch (Exception ignored) {}
                                 }
                             }
@@ -138,11 +140,15 @@ public class AgentExecutionManager {
                 public void onError(Throwable t) { a2aTaskRegistry.unregisterTask(curTask); onError.accept(t); }
                 @Override
                 public void onCompleted() {
-                    if (subTask != null) {
+                    if (subTaskResult != null) {
+                        // 官方规范：Task 使用 getId()
+                        log.info("[A2A] Suspended for: {}", subTaskResult.getId());
                         a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
-                                .task(subTask).conversationId(context.conversationId())
+                                .task(subTaskResult).conversationId(context.conversationId())
                                 .onTaskTerminal((Task finished) -> {
-                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "结果：\n" + finished.id(), "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
+                                    // 官方规范：Task 使用 getId()
+                                    log.info("[A2A] Awakened by: {}", finished.getId());
+                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "委派任务已执行完毕。", "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
                                 }).startTime(System.currentTimeMillis()).build());
                     } else {
                         a2aTaskRegistry.unregisterTask(curTask);

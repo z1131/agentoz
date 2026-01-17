@@ -31,17 +31,22 @@ public class A2ATaskRegistry {
 
     public void registerTask(TaskRecord record) {
         if (record == null || record.getTask() == null) return;
-        String taskId = record.getTask().id(); 
+        // 官方 Sample 规范：Task 使用 getId()
+        String taskId = record.getTask().getId(); 
         activeTasks.put(taskId, record);
         parentToRootMap.put(taskId, record.getConversationId());
-        log.info("[A2ATaskRegistry] Task Registered: id={}, state={}", taskId, record.getTask().status().state());
+        
+        // 官方 Sample 规范：TaskStatus 使用 state()
+        log.info("[A2ATaskRegistry] Task Registered: id={}, state={}", taskId, record.getTask().getStatus().state());
     }
 
     public void updateTask(String taskId, Task updatedTask) {
         TaskRecord record = activeTasks.get(taskId);
         if (record == null) return;
         record.setTask(updatedTask);
-        TaskState state = updatedTask.status().state();
+        
+        // 官方 Sample 规范：TaskStatus 使用 state()
+        TaskState state = updatedTask.getStatus().state();
         if (state == TaskState.COMPLETED || state == TaskState.FAILED || state == TaskState.CANCELED) {
             log.info("[A2ATaskRegistry] Terminal state: {} -> {}", taskId, state);
             if (record.getOnTaskTerminal() != null) record.getOnTaskTerminal().accept(updatedTask);

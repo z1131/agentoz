@@ -30,11 +30,11 @@
             <version>1.0.0-SNAPSHOT</version>
         </dependency>
 
-        <!-- ⭐ Cutting-edge A2A Java SDK Spec (Local Alpha) -->
+        <!-- ⭐ Official A2A Java SDK Spec (Stable Version from Maven Central) -->
         <dependency>
             <groupId>io.github.a2asdk</groupId>
             <artifactId>a2a-java-sdk-spec</artifactId>
-            <version>1.0.0.Alpha1-SNAPSHOT</version>
+            <version>0.3.3.Final</version>
         </dependency>
 
 

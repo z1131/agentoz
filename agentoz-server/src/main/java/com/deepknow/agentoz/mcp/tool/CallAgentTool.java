@@ -20,8 +20,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.List;
+import java.util.Collections;
 
 @Slf4j
 @Component
@@ -66,38 +68,20 @@ public class CallAgentTool {
                         collectText(event, res);
                     }, 
                     () -> {
-                        // 子任务完成
-                        Task completed = Task.builder()
-                                .id(subId)
-                                .contextId(conversationId)
-                                .status(new TaskStatus(TaskState.COMPLETED, createMsg("Success"), null))
-                                .build();
+                        // 官方规范：Task 使用全量构造，TaskStatus 使用 state() 对应的构造
+                        Task completed = new Task(subId, conversationId, new TaskStatus(TaskState.COMPLETED, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
                         a2aTaskRegistry.updateTask(subId, completed);
                     }, 
                     (Throwable t) -> {
-                        Task failed = Task.builder()
-                                .id(subId)
-                                .contextId(conversationId)
-                                .status(new TaskStatus(TaskState.FAILED, createMsg(t.getMessage()), null))
-                                .build();
+                        Task failed = new Task(subId, conversationId, new TaskStatus(TaskState.FAILED, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
                         a2aTaskRegistry.updateTask(subId, failed);
                     });
 
-            // 构建初始任务
-            Task initialTask = Task.builder()
-                    .id(subId)
-                    .contextId(conversationId)
-                    .status(new TaskStatus(TaskState.SUBMITTED, createMsg("Accepted"), null))
-                    .build();
-
+            Task initialTask = new Task(subId, conversationId, new TaskStatus(TaskState.SUBMITTED, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
             return objectMapper.writeValueAsString(initialTask);
         } catch (Exception e) {
             return "Error: " + e.getMessage();
         }
-    }
-
-    private Message createMsg(String text) {
-        return Message.builder().parts(List.of(new TextPart(text))).build();
     }
 
     private void collectText(InternalCodexEvent event, StringBuilder builder) {
