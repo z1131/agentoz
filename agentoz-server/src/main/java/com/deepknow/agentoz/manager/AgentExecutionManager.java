@@ -113,21 +113,19 @@ public class AgentExecutionManager {
                         if (e == null) return;
                         e.setSenderName(agent.getAgentName());
                         persist(context.conversationId(), agent.getAgentName(), e);
-                        collect(e, sb);
                         
-                        // ⭐ 修正事件类型为 item.completed
+                        // ⭐ 核心：全路径抓取文本
+                        extractTextRobustly(e, sb);
+                        
                         if ("item.completed".equals(e.getEventType()) && e.getRawEventJson() != null) {
                             JsonNode toolRes = objectMapper.readTree(e.getRawEventJson()).path("item").path("result");
-                            JsonNode contentArr = toolRes.path("content");
-                            if (contentArr.isArray()) {
-                                for (JsonNode item : contentArr) {
-                                    String text = item.path("text").asText("");
-                                    if (text.contains("\"id\"") && text.contains("\"status\"")) {
-                                        try {
-                                            Task t = objectMapper.readValue(text, Task.class);
-                                            if (t.getId() != null) subTaskCandidate = t;
-                                        } catch (Exception ignored) {}
-                                    }
+                            for (JsonNode contentItem : toolRes.path("content")) {
+                                String text = contentItem.path("text").asText("");
+                                if (text.contains("\"id\"") && text.contains("\"status\"")) {
+                                    try {
+                                        Task t = objectMapper.readValue(text, Task.class);
+                                        if (t.getId() != null) subTaskCandidate = t;
+                                    } catch (Exception ignored) {}
                                 }
                             }
                         }
@@ -147,7 +145,7 @@ public class AgentExecutionManager {
                     if (subTaskCandidate != null) {
                         if (taskStore instanceof A2AConfig.A2AObservableStore store) {
                             store.addTerminalListener(subTaskCandidate.getId(), (finished) -> {
-                                String result = extractResult(finished);
+                                String result = extractResultFromArtifacts(finished);
                                 executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "这是委派任务的最终执行结果：\n" + result, "user", "System(A2A)", false), eventConsumer, onCompleted, onError);
                             });
                         }
@@ -160,7 +158,34 @@ public class AgentExecutionManager {
         } catch (Exception e) { log.error("Execution error", e); onError.accept(e); }
     }
 
-    private String extractResult(Task task) {
+    private void extractTextRobustly(InternalCodexEvent event, StringBuilder accumulator) {
+        try {
+            String json = event.getRawEventJson();
+            if (json == null) return;
+            JsonNode node = objectMapper.readTree(json);
+            
+            String itemText = node.path("item").path("text").asText("");
+            if (!itemText.isEmpty() && accumulator.indexOf(itemText) == -1) {
+                accumulator.append(itemText);
+                return;
+            }
+
+            String deltaText = node.path("delta").path("text").asText("");
+            if (!deltaText.isEmpty()) {
+                accumulator.append(deltaText);
+                return;
+            }
+
+            JsonNode content = node.path("content");
+            if (content.isArray()) {
+                StringBuilder sb = new StringBuilder();
+                for (JsonNode part : content) if (part.has("text")) sb.append(part.get("text").asText());
+                if (sb.length() > accumulator.length()) { accumulator.setLength(0); accumulator.append(sb); }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private String extractResultFromArtifacts(Task task) {
         if (task.getArtifacts() == null) return "No result";
         StringBuilder sb = new StringBuilder();
         for (Artifact art : task.getArtifacts()) {
@@ -199,25 +224,13 @@ public class AgentExecutionManager {
         } catch (Exception ignored) {}
     }
 
-    private void collect(InternalCodexEvent e, StringBuilder b) {
-        try {
-            if (e.getRawEventJson() == null) return;
-            JsonNode n = objectMapper.readTree(e.getRawEventJson());
-            if ("agent_message_delta".equals(e.getEventType())) { if (n.path("delta").has("text")) b.append(n.path("delta").path("text").asText()); }
-            else if ("agent_message".equals(e.getEventType())) {
-                JsonNode c = n.path("content");
-                if (c.isArray()) { b.setLength(0); for (JsonNode i : c) if (i.has("text")) b.append(i.get("text").asText()); }
-            }
-        } catch (Exception ignored) {}
-    }
-
     private void persist(String cid, String sdr, InternalCodexEvent ev) {
         try {
             if (ev.getEventType() == null || ev.getRawEventJson() == null) return;
             JsonNode n = objectMapper.readTree(ev.getRawEventJson());
             ObjectNode item = null;
             if ("agent_message".equals(ev.getEventType())) item = msg(sdr, n);
-            else if ("item_completed".equals(ev.getEventType())) item = tool(sdr, n);
+            else if ("item.completed".equals(ev.getEventType())) item = tool(sdr, n);
             else if ("agent_reasoning".equals(ev.getEventType())) item = reason(sdr, n);
             if (item != null) {
                 appendH(cid, item);

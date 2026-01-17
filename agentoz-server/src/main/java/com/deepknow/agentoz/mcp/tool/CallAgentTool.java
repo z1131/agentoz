@@ -12,6 +12,7 @@ import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.OffsetDateTime;
@@ -33,71 +34,80 @@ public class CallAgentTool {
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
-    @AgentTool(name = "call_agent", description = "委派任务给另一个智能体并等待其完成。")
+    public static final String A2A_DELEGATED_MARKER = "[A2A_TASK_DELEGATED:";
+
+    @AgentTool(name = "call_agent", description = "委派任务给另一个智能体")
     public String callAgent(
             McpTransportContext ctx,
-            @AgentParam(name = "targetAgentName", value = "目标智能体名称") String targetAgentName,
-            @AgentParam(name = "task", value = "任务指令") String task
+            @AgentParam(name = "targetAgentName", value = "目标名称") String targetAgentName,
+            @AgentParam(name = "task", value = "指令") String task
     ) {
         try {
             String conversationId = getHeader(ctx, "X-Conversation-ID");
             AgentEntity target = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getConversationId, conversationId).eq(AgentEntity::getAgentName, targetAgentName));
-            if (target == null) return "Error: Target agent not found";
+            if (target == null) return "Error: Target not found";
 
             final CompletableFuture<String> resultFuture = new CompletableFuture<>();
             final StringBuilder resAccumulator = new StringBuilder();
-            
-            log.info("[CallAgent] 🔄 Starting synchronous delegation (waiting up to 55s): {} -> {}", "System", targetAgentName);
 
-            // 启动子任务
             agentExecutionManager.executeTaskExtended(new AgentExecutionManager.ExecutionContextExtended(
                     target.getAgentId(), conversationId, task, "assistant", "System", true), 
                     (InternalCodexEvent event) -> {
                         if (event == null) return;
                         event.setSenderName(targetAgentName);
-                        // 实时透传事件给前端流
                         agentExecutionManager.broadcastSubTaskEvent(conversationId, event);
-                        collectText(event, resAccumulator);
+                        // ⭐ 核心：全路径抓取文本
+                        extractTextRobustly(event, resAccumulator);
                     }, 
                     () -> {
-                        // 子任务完成：唤醒当前线程
-                        resultFuture.complete(resAccumulator.toString());
+                        String finalResult = resAccumulator.toString().trim();
+                        log.info("[CallAgent] Subtask completed. Content length: {}", finalResult.length());
+                        resultFuture.complete(finalResult);
                     }, 
                     (Throwable t) -> {
                         resultFuture.completeExceptionally(t);
                     });
 
-            // ⭐ 核心逻辑：挂起当前 Java 线程，等待子智能体结果 (Codex 60s 超时防护)
-            String result = resultFuture.get(55, TimeUnit.SECONDS);
-            
-            if (result == null || result.isBlank()) {
-                return "子智能体已完成，但未返回任何内容。";
-            }
-            
-            log.info("[CallAgent] ✅ Result received, returning to caller LLM.");
-            return result;
-
-        } catch (java.util.concurrent.TimeoutException e) {
-            log.warn("[CallAgent] ⚠️ Delegation timed out at 55s.");
-            return "任务正在处理中，由于耗时较长，请稍后再次确认进度。";
+            return resultFuture.get(55, TimeUnit.SECONDS);
         } catch (Exception e) {
-            log.error("CallAgent execution fail", e);
+            log.error("CallAgent error", e);
             return "Error: " + e.getMessage();
         }
     }
 
-    private void collectText(InternalCodexEvent event, StringBuilder builder) {
+    /**
+     * 鲁棒的文本提取：不管是 delta, agent_message 还是 item.completed，只要有文字就抓出来
+     */
+    private void extractTextRobustly(InternalCodexEvent event, StringBuilder accumulator) {
         try {
-            if (event.getRawEventJson() == null) return;
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(event.getRawEventJson());
-            if ("agent_message_delta".equals(event.getEventType())) {
-                if (node.path("delta").has("text")) builder.append(node.path("delta").path("text").asText());
-            } else if ("agent_message".equals(event.getEventType())) {
-                com.fasterxml.jackson.databind.JsonNode c = node.path("content");
-                if (c.isArray()) {
-                    StringBuilder fullText = new StringBuilder();
-                    for (com.fasterxml.jackson.databind.JsonNode i : c) if (i.has("text")) fullText.append(i.get("text").asText());
-                    if (fullText.length() > builder.length()) { builder.setLength(0); builder.append(fullText); }
+            String json = event.getRawEventJson();
+            if (json == null) return;
+            JsonNode node = objectMapper.readTree(json);
+            
+            // 1. 抓取 item.text (针对 item.completed 事件)
+            String itemText = node.path("item").path("text").asText("");
+            if (!itemText.isEmpty() && accumulator.indexOf(itemText) == -1) {
+                accumulator.append(itemText);
+                return;
+            }
+
+            // 2. 抓取 delta.text (针对增量事件)
+            String deltaText = node.path("delta").path("text").asText("");
+            if (!deltaText.isEmpty()) {
+                accumulator.append(deltaText);
+                return;
+            }
+
+            // 3. 抓取 content 数组 (针对 OpenAI 风格全量事件)
+            JsonNode content = node.path("content");
+            if (content.isArray()) {
+                StringBuilder sb = new StringBuilder();
+                for (JsonNode part : content) {
+                    if (part.has("text")) sb.append(part.get("text").asText());
+                }
+                if (sb.length() > accumulator.length()) {
+                    accumulator.setLength(0);
+                    accumulator.append(sb);
                 }
             }
         } catch (Exception ignored) {}
