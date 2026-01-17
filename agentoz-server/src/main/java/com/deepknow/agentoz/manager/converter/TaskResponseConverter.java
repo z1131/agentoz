@@ -73,6 +73,16 @@ public class TaskResponseConverter {
 
                 // ⚠️ 兼容旧代码：继续填充旧字段（逐步废弃）
                 parseEventToResponse(event, dto);
+                
+                // ✨ 新增：透传 standardized display items
+                if (event.getDisplayItems() != null && !event.getDisplayItems().isEmpty()) {
+                    List<String> items = dto.getNewItemsJson();
+                    if (items == null) {
+                        items = new ArrayList<>();
+                        dto.setNewItemsJson(items);
+                    }
+                    items.addAll(event.getDisplayItems());
+                }
             }
         }
 

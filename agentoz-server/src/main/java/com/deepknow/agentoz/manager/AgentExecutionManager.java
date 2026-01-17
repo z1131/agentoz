@@ -196,10 +196,9 @@ public class AgentExecutionManager {
                     sessionConfig.getMcpServersMap().keySet());
 
                 // 7.05 打印提示词配置（调试用）
-                log.info("[DEBUG] 提示词配置: baseInstructions长度={}, developerInstructions长度={}, configChanged={}",
+                log.info("[DEBUG] 提示词配置: baseInstructions长度={}, developerInstructions长度={}",
                     (sessionConfig.getBaseInstructions() != null ? sessionConfig.getBaseInstructions().length() : 0),
-                    (sessionConfig.getDeveloperInstructions() != null ? sessionConfig.getDeveloperInstructions().length() : 0),
-                    configChanged);
+                    (sessionConfig.getDeveloperInstructions() != null ? sessionConfig.getDeveloperInstructions().length() : 0));
                 if (sessionConfig.getDeveloperInstructions() != null && sessionConfig.getDeveloperInstructions().length() > 0) {
                     log.info("[DEBUG] developerInstructions内容前200字符: {}",
                         sessionConfig.getDeveloperInstructions().substring(0, Math.min(200, sessionConfig.getDeveloperInstructions().length())));
@@ -508,6 +507,13 @@ public class AgentExecutionManager {
 
             if (historyItem != null) {
                 appendHistoryItem(conversationId, historyItem);
+                
+                // 同时将该项加入事件对象，准备透传给前端
+                if (event.getDisplayItems() == null) {
+                    event.setDisplayItems(new java.util.ArrayList<>());
+                }
+                event.getDisplayItems().add(historyItem.toString());
+                
                 log.info("[Persistence] ✓ 已实时保存事件: type={}, sender={}", eventType, senderName);
             }
         } catch (Exception e) {

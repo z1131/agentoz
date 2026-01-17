@@ -80,6 +80,12 @@ public class InternalCodexEvent {
     private String senderName;
 
     /**
+     * 标准化展示项 (JSON 字符串列表)
+     * 用于直接透传给前端展示，格式与 historyContext 中存储的一致
+     */
+    private java.util.List<String> displayItems;
+
+    /**
      * 事件状态枚举
      */
     public enum Status {
