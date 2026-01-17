@@ -174,24 +174,8 @@ public class AgentExecutionManager {
             log.info("准备调用Codex: agentId={}, model={}, historySize={} bytes",
                     agentId, config.getLlmModel(), historyRollout.length);
 
-                // 7. 🔧 配置发送策略：避免重复发送指令，但保留必要配置
-                // 问题：发送空配置会导致codex使用默认逻辑（注入"codex cli"人设等）
-                // 方案：有历史时发送"仅模型配置"（不含指令），无历史时发送完整配置
-                boolean hasHistory = (historyRollout != null && historyRollout.length > 0);
-
-                SessionConfig sessionConfig;
-
-                if (hasHistory) {
-                    // 有历史记录，发送仅模型配置（不含指令，避免重复）
-                    // 保留：model, model_provider, provider_info（让codex知道这不是默认配置）
-                    // 清除：base_instructions, developer_instructions（已在rollout中）
-                    log.info("⏩ 检测到历史记录，发送仅模型配置（不含指令）: agentId={}", agentId);
-                    sessionConfig = ConfigProtoConverter.toModelOnlyConfig(config);
-                } else {
-                    // 首次调用，发送完整配置
-                    log.info("✨ 首次调用，发送完整配置: agentId={}", agentId);
-                    sessionConfig = ConfigProtoConverter.toSessionConfig(config);
-                }
+                // 7. 构建 Codex 请求
+                SessionConfig sessionConfig = ConfigProtoConverter.toSessionConfig(config);
 
                 // 7.0 打印 MCP 服务器配置（调试用）
                 log.info("[DEBUG] MCP Servers 配置: count={}, servers={}",
