@@ -19,6 +19,11 @@ import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.model.ConversationEntity;
 import codex.agent.RunTaskRequest;
 import codex.agent.SessionConfig;
+import io.a2a.spec.Task;
+import io.a2a.spec.TaskState;
+import io.a2a.spec.TaskStatus;
+import io.a2a.spec.Message;
+import io.a2a.spec.TextPart;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -32,6 +37,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.List;
 
 @Slf4j
 @Component
@@ -74,9 +80,13 @@ public class AgentExecutionManager {
         final String curTask = (a2a.getDepth() == 0) ? context.conversationId() : UUID.randomUUID().toString();
 
         try {
+            // 注册初始任务
             a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
-                    .taskId(curTask).conversationId(context.conversationId()).a2aContext(a2a)
-                    .eventConsumer(eventConsumer).startTime(System.currentTimeMillis()).build());
+                    .task(Task.builder().id(curTask).contextId(context.conversationId()).status(new TaskStatus(TaskState.WORKING)).build())
+                    .conversationId(context.conversationId())
+                    .eventConsumer(eventConsumer)
+                    .startTime(System.currentTimeMillis())
+                    .build());
 
             AgentEntity agent = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, resolveAgentId(context)));
             AgentConfigEntity config = agentConfigRepository.selectOne(new LambdaQueryWrapper<AgentConfigEntity>().eq(AgentConfigEntity::getConfigId, agent.getConfigId()));
@@ -93,7 +103,7 @@ public class AgentExecutionManager {
 
             final StringBuilder sb = new StringBuilder();
             codexAgentClient.runTask(agent.getConversationId(), req, new StreamObserver<codex.agent.RunTaskResponse>() {
-                private String subId = null;
+                private Task subTask = null;
                 @Override
                 public void onNext(codex.agent.RunTaskResponse p) {
                     try {
@@ -103,23 +113,15 @@ public class AgentExecutionManager {
                         persist(context.conversationId(), agent.getAgentName(), e);
                         collect(e, sb);
                         
-                        // ⭐ 核心修正：深度扫描工具执行结果
                         if ("item_completed".equals(e.getEventType()) && e.getRawEventJson() != null) {
-                            JsonNode root = objectMapper.readTree(e.getRawEventJson());
-                            // 穿透 MCP 结构: item -> result -> content[0] -> text
-                            JsonNode toolResult = root.path("item").path("result");
-                            JsonNode contentArr = toolResult.path("content");
-                            if (contentArr.isArray()) {
-                                for (JsonNode contentItem : contentArr) {
-                                    String text = contentItem.path("text").asText("");
-                                    if (text.contains(CallAgentTool.A2A_DELEGATED_MARKER)) {
-                                        int s = text.indexOf(CallAgentTool.A2A_DELEGATED_MARKER) + CallAgentTool.A2A_DELEGATED_MARKER.length();
-                                        int end = text.indexOf("]", s);
-                                        if (end > s) {
-                                            subId = text.substring(s, end);
-                                            log.info("[A2A] 🎯 FOUND DELEGATION MARKER: subTaskId={}", subId);
-                                        }
-                                    }
+                            JsonNode toolRes = objectMapper.readTree(e.getRawEventJson()).path("item").path("result");
+                            for (JsonNode contentItem : toolRes.path("content")) {
+                                String text = contentItem.path("text").asText("");
+                                if (text.contains("\"id\"") && text.contains("\"status\"")) {
+                                    try {
+                                        Task t = objectMapper.readValue(text, Task.class);
+                                        if (t.id() != null) { subTask = t; }
+                                    } catch (Exception ignored) {}
                                 }
                             }
                         }
@@ -136,14 +138,11 @@ public class AgentExecutionManager {
                 public void onError(Throwable t) { a2aTaskRegistry.unregisterTask(curTask); onError.accept(t); }
                 @Override
                 public void onCompleted() {
-                    if (subId != null) {
-                        log.info("[A2A] ⚡ SESSION SUSPENDED, waiting for subTask: {}", subId);
+                    if (subTask != null) {
                         a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
-                                .taskId(subId).conversationId(context.conversationId())
-                                .a2aContext(a2a.next(curTask))
-                                .onTaskCompleted((String res) -> {
-                                    log.info("[A2A] 🔔 AWAKENING parent task with result from: {}", subId);
-                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "这是刚才委派任务的最终执行结果：\n" + res, "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
+                                .task(subTask).conversationId(context.conversationId())
+                                .onTaskTerminal((Task finished) -> {
+                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "结果：\n" + finished.id(), "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
                                 }).startTime(System.currentTimeMillis()).build());
                     } else {
                         a2aTaskRegistry.unregisterTask(curTask);
@@ -199,23 +198,22 @@ public class AgentExecutionManager {
         try {
             if (ev.getEventType() == null || ev.getRawEventJson() == null) return;
             JsonNode n = objectMapper.readTree(ev.getRawEventJson());
-            ObjectNode i = null;
-            if ("agent_message".equals(ev.getEventType())) i = msg(sdr, n);
-            else if ("item_completed".equals(ev.getEventType())) i = tool(sdr, n);
-            else if ("agent_reasoning".equals(ev.getEventType())) i = reason(sdr, n);
-            if (i != null) {
-                appendH(cid, i);
+            ObjectNode item = null;
+            if ("agent_message".equals(ev.getEventType())) item = msg(sdr, n);
+            else if ("item_completed".equals(ev.getEventType())) item = tool(sdr, n);
+            else if ("agent_reasoning".equals(ev.getEventType())) item = reason(sdr, n);
+            if (item != null) {
+                appendH(cid, item);
                 if (ev.getDisplayItems() == null) ev.setDisplayItems(new java.util.ArrayList<>());
-                ev.getDisplayItems().add(itemToJson(i));
+                ev.getDisplayItems().add(objectMapper.writeValueAsString(item));
             }
         } catch (Exception ignored) {}
     }
 
-    private String itemToJson(ObjectNode node) { try { return objectMapper.writeValueAsString(node); } catch (Exception e) { return "{}"; } }
-
     private ObjectNode msg(String s, JsonNode n) {
         ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "AgentMessage"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString());
-        ArrayNode c = objectMapper.createArrayNode(); for (JsonNode x : n.path("content")) { if (x.has("text")) { ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", x.get("text").asText()); c.add(t); } } 
+        ArrayNode c = objectMapper.createArrayNode();
+        for (JsonNode x : n.path("content")) { if (x.has("text")) { ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", x.get("text").asText()); c.add(t); } }
         i.set("content", c); return i;
     }
 

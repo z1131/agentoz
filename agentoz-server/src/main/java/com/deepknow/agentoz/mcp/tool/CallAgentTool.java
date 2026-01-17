@@ -9,14 +9,19 @@ import com.deepknow.agentoz.manager.A2ATaskRegistry;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.starter.annotation.AgentParam;
 import com.deepknow.agentoz.starter.annotation.AgentTool;
+import io.a2a.spec.Task;
+import io.a2a.spec.TaskStatus;
+import io.a2a.spec.TaskState;
+import io.a2a.spec.Message;
+import io.a2a.spec.TextPart;
 import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.UUID;
+import java.util.List;
 
 @Slf4j
 @Component
@@ -36,65 +41,74 @@ public class CallAgentTool {
     public String callAgent(
             McpTransportContext ctx,
             @AgentParam(name = "targetAgentName", value = "目标名称") String targetAgentName,
-            @AgentParam(name = "task", value = "任务描述") String task,
-            @AgentParam(name = "context", value = "上下文", required = false) String context
+            @AgentParam(name = "task", value = "任务指令") String task
     ) {
-        String subTaskId = UUID.randomUUID().toString();
+        String subId = UUID.randomUUID().toString();
         try {
-            String sourceAgentId = getHeader(ctx, "X-Agent-ID");
             String conversationId = getHeader(ctx, "X-Conversation-ID");
-            String parentTaskIdFromHeader = getHeader(ctx, "X-A2A-Parent-Task-ID");
-            int depth = 0;
-            String d = getHeader(ctx, "X-A2A-Depth");
-            if (d != null) try { depth = Integer.parseInt(d); } catch (Exception ignored) {}
-
-            if (depth >= 5) return "Error: depth limit";
-
             AgentEntity target = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getConversationId, conversationId).eq(AgentEntity::getAgentName, targetAgentName));
-            if (target == null) return "Error: agent not found";
+            if (target == null) return "Error: Target not found";
 
-            String sourceName = "Assistant";
-            if (sourceAgentId != null) {
-                AgentEntity source = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, sourceAgentId));
-                if (source != null) sourceName = source.getAgentName();
-            }
-
-            final String parentTaskId = parentTaskIdFromHeader != null ? parentTaskIdFromHeader : conversationId;
             A2AContext childCtx = A2AContext.builder()
                     .traceId(getHeader(ctx, "X-A2A-Trace-ID") != null ? getHeader(ctx, "X-A2A-Trace-ID") : UUID.randomUUID().toString())
-                    .parentTaskId(parentTaskId)
-                    .depth(depth + 1)
-                    .originAgentId(getHeader(ctx, "X-A2A-Origin-Agent-ID") != null ? getHeader(ctx, "X-A2A-Origin-Agent-ID") : sourceAgentId)
+                    .parentTaskId(conversationId)
+                    .depth(1)
+                    .originAgentId(getHeader(ctx, "X-Agent-ID"))
                     .build();
 
             final StringBuilder res = new StringBuilder();
-            agentExecutionManager.executeTaskExtended(new AgentExecutionManager.ExecutionContextExtended(target.getAgentId(), conversationId, task, "assistant", sourceName, true, childCtx), (InternalCodexEvent event) -> {
-                if (event == null) return;
-                event.setSenderName(targetAgentName);
-                a2aTaskRegistry.sendEvent(parentTaskId, event);
-                collectText(event, res);
-            }, () -> {
-                a2aTaskRegistry.completeTask(subTaskId, res.toString());
-            }, (Throwable t) -> {
-                a2aTaskRegistry.completeTask(subTaskId, "Error: " + t.getMessage());
-            });
+            agentExecutionManager.executeTaskExtended(new AgentExecutionManager.ExecutionContextExtended(
+                    target.getAgentId(), conversationId, task, "assistant", "System", true, childCtx), 
+                    (InternalCodexEvent event) -> {
+                        if (event == null) return;
+                        event.setSenderName(targetAgentName);
+                        a2aTaskRegistry.sendEvent(conversationId, event);
+                        collectText(event, res);
+                    }, 
+                    () -> {
+                        // 子任务完成
+                        Task completed = Task.builder()
+                                .id(subId)
+                                .contextId(conversationId)
+                                .status(new TaskStatus(TaskState.COMPLETED, createMsg("Success"), null))
+                                .build();
+                        a2aTaskRegistry.updateTask(subId, completed);
+                    }, 
+                    (Throwable t) -> {
+                        Task failed = Task.builder()
+                                .id(subId)
+                                .contextId(conversationId)
+                                .status(new TaskStatus(TaskState.FAILED, createMsg(t.getMessage()), null))
+                                .build();
+                        a2aTaskRegistry.updateTask(subId, failed);
+                    });
 
-            return A2A_DELEGATED_MARKER + subTaskId + "]";
+            // 构建初始任务
+            Task initialTask = Task.builder()
+                    .id(subId)
+                    .contextId(conversationId)
+                    .status(new TaskStatus(TaskState.SUBMITTED, createMsg("Accepted"), null))
+                    .build();
+
+            return objectMapper.writeValueAsString(initialTask);
         } catch (Exception e) {
-            log.error("CallAgent fail", e);
             return "Error: " + e.getMessage();
         }
+    }
+
+    private Message createMsg(String text) {
+        return Message.builder().parts(List.of(new TextPart(text))).build();
     }
 
     private void collectText(InternalCodexEvent event, StringBuilder builder) {
         try {
             if (event.getRawEventJson() == null) return;
-            JsonNode node = objectMapper.readTree(event.getRawEventJson());
+            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(event.getRawEventJson());
             if ("agent_message_delta".equals(event.getEventType())) {
                 if (node.path("delta").has("text")) builder.append(node.path("delta").path("text").asText());
             } else if ("agent_message".equals(event.getEventType())) {
-                JsonNode c = node.path("content");
-                if (c.isArray() && builder.length() == 0) for (JsonNode i : c) if (i.has("text")) builder.append(i.get("text").asText());
+                com.fasterxml.jackson.databind.JsonNode c = node.path("content");
+                if (c.isArray() && builder.length() == 0) for (com.fasterxml.jackson.databind.JsonNode i : c) if (i.has("text")) builder.append(i.get("text").asText());
             }
         } catch (Exception ignored) {}
     }

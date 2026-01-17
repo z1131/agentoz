@@ -1,6 +1,7 @@
 package com.deepknow.agentoz.manager;
 
-import com.deepknow.agentoz.dto.A2AContext;
+import io.a2a.spec.Task;
+import io.a2a.spec.TaskState;
 import com.deepknow.agentoz.dto.InternalCodexEvent;
 import lombok.Builder;
 import lombok.Data;
@@ -18,11 +19,10 @@ public class A2ATaskRegistry {
     @Data
     @Builder
     public static class TaskRecord {
-        private String taskId;
+        private Task task;
         private String conversationId;
-        private A2AContext a2aContext;
         private Consumer<InternalCodexEvent> eventConsumer;
-        private Consumer<String> onTaskCompleted;
+        private Consumer<Task> onTaskTerminal;
         private long startTime;
     }
 
@@ -30,14 +30,24 @@ public class A2ATaskRegistry {
     private final Map<String, String> parentToRootMap = new ConcurrentHashMap<>();
 
     public void registerTask(TaskRecord record) {
-        if (record == null || record.getTaskId() == null) return;
-        activeTasks.put(record.getTaskId(), record);
-        if (record.getA2aContext() != null && record.getA2aContext().getParentTaskId() != null) {
-            String parentId = record.getA2aContext().getParentTaskId();
-            String rootId = parentToRootMap.getOrDefault(parentId, parentId);
-            parentToRootMap.put(record.getTaskId(), rootId);
+        if (record == null || record.getTask() == null) return;
+        String taskId = record.getTask().id(); 
+        activeTasks.put(taskId, record);
+        parentToRootMap.put(taskId, record.getConversationId());
+        log.info("[A2ATaskRegistry] Task Registered: id={}, state={}", taskId, record.getTask().status().state());
+    }
+
+    public void updateTask(String taskId, Task updatedTask) {
+        TaskRecord record = activeTasks.get(taskId);
+        if (record == null) return;
+        record.setTask(updatedTask);
+        TaskState state = updatedTask.status().state();
+        if (state == TaskState.COMPLETED || state == TaskState.FAILED || state == TaskState.CANCELED) {
+            log.info("[A2ATaskRegistry] Terminal state: {} -> {}", taskId, state);
+            if (record.getOnTaskTerminal() != null) record.getOnTaskTerminal().accept(updatedTask);
+            activeTasks.remove(taskId);
+            parentToRootMap.remove(taskId);
         }
-        log.info("[A2ATaskRegistry] Register: taskId={}, depth={}", record.getTaskId(), record.getA2aContext() != null ? record.getA2aContext().getDepth() : 0);
     }
 
     public void unregisterTask(String taskId) {
@@ -46,20 +56,12 @@ public class A2ATaskRegistry {
         parentToRootMap.remove(taskId);
     }
 
-    public void completeTask(String taskId, String result) {
-        TaskRecord record = activeTasks.get(taskId);
-        if (record != null && record.getOnTaskCompleted() != null) {
-            record.getOnTaskCompleted().accept(result);
-        }
-        unregisterTask(taskId);
-    }
-
     public void sendEvent(String taskId, InternalCodexEvent event) {
-        Consumer<InternalCodexEvent> consumer = findConsumer(taskId);
+        Consumer<InternalCodexEvent> consumer = findRootConsumer(taskId);
         if (consumer != null) consumer.accept(event);
     }
 
-    private Consumer<InternalCodexEvent> findConsumer(String taskId) {
+    private Consumer<InternalCodexEvent> findRootConsumer(String taskId) {
         TaskRecord record = activeTasks.get(taskId);
         if (record != null && record.getEventConsumer() != null) return record.getEventConsumer();
         String rootId = parentToRootMap.get(taskId);
