@@ -252,6 +252,26 @@ public class AgentManagerServiceImpl implements AgentManagerService {
         return historyContext;
     }
 
+    @Override
+    public java.util.List<com.deepknow.agentoz.api.dto.AgentDTO> listAgentsByConversation(String conversationId) {
+        log.info("获取会话Agent列表: conversationId={}", conversationId);
+
+        java.util.List<AgentEntity> agents = agentRepository.selectList(
+                new LambdaQueryWrapper<AgentEntity>()
+                        .eq(AgentEntity::getConversationId, conversationId)
+        );
+
+        return agents.stream().map(agent -> {
+            com.deepknow.agentoz.api.dto.AgentDTO dto = new com.deepknow.agentoz.api.dto.AgentDTO();
+            dto.setAgentId(agent.getAgentId());
+            dto.setAgentName(agent.getAgentName());
+            dto.setIsPrimary(agent.getIsPrimary());
+            dto.setConversationId(agent.getConversationId());
+            dto.setConfigId(agent.getConfigId());
+            return dto;
+        }).collect(java.util.stream.Collectors.toList());
+    }
+
     /**
      * 创建Agent配置实体
      *

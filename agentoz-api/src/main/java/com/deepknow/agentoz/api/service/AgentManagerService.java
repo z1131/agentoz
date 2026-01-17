@@ -40,4 +40,11 @@ public interface AgentManagerService {
      * @return 历史记录JSON数组字符串，格式：[{...}, {...}]
      */
     String getConversationHistory(String conversationId);
+
+    /**
+     * 获取指定会话中的所有 Agent
+     * @param conversationId 会话ID
+     * @return Agent列表
+     */
+    java.util.List<com.deepknow.agentoz.api.dto.AgentDTO> listAgentsByConversation(String conversationId);
 }
