@@ -15,13 +15,15 @@ import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 
 /**
- * Call Agent Tool - 实现 Agent 间相互调用 (A2A 协作版)
+ * Call Agent Tool - 实现 Agent 间相互调用 (A2A 稳健版)
  */
 @Slf4j
 @Component
@@ -36,6 +38,8 @@ public class CallAgentTool {
     @Autowired
     private A2ATaskRegistry a2aTaskRegistry;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     @AgentTool(name = "call_agent", description = "调用另一个Agent执行任务，实现Agent间协作。可以指定目标Agent名称和具体任务。")
     public String callAgent(
             io.modelcontextprotocol.common.McpTransportContext ctx,
@@ -43,10 +47,7 @@ public class CallAgentTool {
             @AgentParam(name = "task", value = "要执行的任务描述", required = true) String task,
             @AgentParam(name = "context", value = "附加的上下文信息（可选）", required = false) String context
     ) {
-        String subTaskId = UUID.randomUUID().toString();
         try {
-            log.info("[CallAgent] 开始委派任务, targetAgentName={}, subTaskId={}", targetAgentName, subTaskId);
-
             // 1. 提取 A2A 上下文
             String sourceAgentId = getHeader(ctx, "X-Agent-ID");
             String conversationId = getHeader(ctx, "X-Conversation-ID");
@@ -61,12 +62,7 @@ public class CallAgentTool {
                 } catch (NumberFormatException ignored) {}
             }
 
-            // 2. 递归深度检查
-            if (currentDepth >= 5) {
-                return "Error: 任务嵌套层次太深，为了系统安全已拦截。";
-            }
-
-            // 3. 查找目标 Agent
+            // 2. 判定目标 Agent
             AgentEntity targetAgent = agentRepository.selectOne(
                     new LambdaQueryWrapper<AgentEntity>()
                             .eq(AgentEntity::getConversationId, conversationId)
@@ -74,30 +70,32 @@ public class CallAgentTool {
             );
             if (targetAgent == null) return String.format("Error: 找不到 Agent '%s'。", targetAgentName);
 
-            // 查找源 Agent 名称
+            // 3. 递归深度检查
+            if (currentDepth >= 5) {
+                return "Error: 任务嵌套层次太深，已拦截。";
+            }
+
+            // 4. 构建上下文链路
             String sourceAgentName = "Assistant";
             if (sourceAgentId != null) {
                 AgentEntity sourceAgent = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, sourceAgentId));
                 if (sourceAgent != null) sourceAgentName = sourceAgent.getAgentName();
             }
 
-            // 5. 构建 A2A 上下文接力
+            final String parentTaskId = parentTaskIdFromHeader != null ? parentTaskIdFromHeader : conversationId;
             A2AContext parentA2aContext = A2AContext.builder()
                     .traceId(traceId != null ? traceId : UUID.randomUUID().toString())
                     .parentTaskId(parentTaskIdFromHeader)
                     .depth(currentDepth)
                     .originAgentId(originAgentId != null ? originAgentId : sourceAgentId)
                     .build();
-            
-            // 派生下一级
-            A2AContext childA2aContext = parentA2aContext.next(parentTaskIdFromHeader != null ? parentTaskIdFromHeader : sourceAgentId);
+            A2AContext childA2aContext = parentA2aContext.next(parentTaskId);
 
-            // 6. 执行子任务
+            // 5. 准备执行
             final CompletableFuture<String> resultFuture = new CompletableFuture<>();
             final StringBuilder fullResponse = new StringBuilder();
-            final String parentTaskId = parentTaskIdFromHeader != null ? parentTaskIdFromHeader : conversationId;
 
-            AgentExecutionManager.ExecutionContextExtended executionContext =
+            AgentExecutionManager.ExecutionContextExtended executionContext = 
                     new AgentExecutionManager.ExecutionContextExtended(
                             targetAgent.getAgentId(),
                             conversationId,
@@ -114,30 +112,70 @@ public class CallAgentTool {
                         if (event == null) return;
                         event.setSenderName(targetAgentName);
                         
-                        // ⭐ 关键修正：将事件推给父任务，而不是推给自己（防止无限递归）
+                        // ⭐ A2A 事件路由：直接推给父会话流
                         a2aTaskRegistry.sendEvent(parentTaskId, event);
 
-                        TaskResponse respDto = TaskResponseConverter.toTaskResponse(event);
-                        if (respDto != null && respDto.getTextDelta() != null) {
-                            fullResponse.append(respDto.getTextDelta());
-                        }
+                        // ⭐ 稳健的文本提取逻辑
+                        extractText(event, fullResponse);
                     },
                     () -> {
-                        // 子任务完成，resultFuture 拿到最终结果返回给主智能体
-                        resultFuture.complete(fullResponse.toString());
+                        // 任务完成，返回最终累计的文本
+                        String result = fullResponse.toString().trim();
+                        log.info("[CallAgent] ✓ 子任务执行完成, 返回长度: {}", result.length());
+                        resultFuture.complete(result);
                     },
                     (Throwable t) -> {
+                        log.error("[CallAgent] ✗ 子任务执行异常", t);
                         resultFuture.completeExceptionally(t);
                     }
             );
 
-
-            // 7. 暂时保留阻塞 (待第三阶段重构为完全异步)
-            return resultFuture.get(30, TimeUnit.MINUTES);
+            // 6. 阻塞等待结果 (Codex 硬超时为 60s)
+            String finalResult = resultFuture.get(30, TimeUnit.MINUTES);
+            if (finalResult.isEmpty()) {
+                return "Error: 子智能体执行完成，但未返回任何有效文本内容。";
+            }
+            return finalResult;
 
         } catch (Exception e) {
             log.error("CallAgent 执行异常", e);
             return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 从 InternalCodexEvent 中精准提取文本内容
+     * 兼容 Delta (增量) 和 Final (全量) 模式
+     */
+    private void extractText(InternalCodexEvent event, StringBuilder builder) {
+        try {
+            // 1. 尝试通过标准 Converter 提取增量
+            TaskResponse respDto = TaskResponseConverter.toTaskResponse(event);
+            if (respDto != null && respDto.getTextDelta() != null) {
+                builder.append(respDto.getTextDelta());
+                return;
+            }
+            
+            // 2. 如果增量为空，尝试解析原始 JSON 提取全量内容 (针对 agent_message 事件)
+            String rawJson = event.getRawEventJson();
+            if (rawJson != null) {
+                JsonNode node = objectMapper.readTree(rawJson);
+                if ("agent_message".equals(event.getEventType())) {
+                    JsonNode content = node.path("content");
+                    if (content.isArray()) {
+                        StringBuilder fullText = new StringBuilder();
+                        for (JsonNode item : content) {
+                            if (item.has("text")) fullText.append(item.get("text").asText());
+                        }
+                        if (fullText.length() > 0) {
+                            // 如果全量结果大于当前已收集的增量，则进行同步/覆盖 (简化逻辑：如果 builder 空则填入)
+                            if (builder.length() == 0) builder.append(fullText);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("提取文本响应失败: {}", e.getMessage());
         }
     }
 
