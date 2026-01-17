@@ -3,7 +3,6 @@ package com.deepknow.agentoz.manager;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.deepknow.agentoz.api.common.exception.AgentOzErrorCode;
 import com.deepknow.agentoz.api.common.exception.AgentOzException;
-import com.deepknow.agentoz.dto.A2AContext;
 import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.infra.client.CodexAgentClient;
 import com.deepknow.agentoz.infra.converter.grpc.ConfigProtoConverter;
@@ -13,12 +12,14 @@ import com.deepknow.agentoz.infra.repo.AgentConfigRepository;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.infra.repo.ConversationRepository;
 import com.deepknow.agentoz.infra.util.JwtUtils;
+import com.deepknow.agentoz.infra.config.A2AConfig;
 import com.deepknow.agentoz.mcp.tool.CallAgentTool;
 import com.deepknow.agentoz.model.AgentConfigEntity;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.model.ConversationEntity;
 import codex.agent.RunTaskRequest;
 import codex.agent.SessionConfig;
+import io.a2a.server.tasks.TaskStore;
 import io.a2a.spec.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,6 +37,8 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.List;
 import java.util.Collections;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Component
@@ -48,17 +51,19 @@ public class AgentExecutionManager {
     private final CodexAgentClient codexAgentClient;
     private final AgentContextManager agentContextManager;
     private final JwtUtils jwtUtils;
-    private final A2ATaskRegistry a2aTaskRegistry;
+    private final TaskStore taskStore;
 
     private final String websiteUrl = "https://agentoz.deepknow.online";
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
+    private final Map<String, Consumer<InternalCodexEvent>> sessionStreams = new ConcurrentHashMap<>();
+
     public record ExecutionContext(String agentId, String conversationId, String userMessage, String role, String senderName) {}
 
     public record ExecutionContextExtended(
             String agentId, String conversationId, String userMessage, String role, String senderName,
-            boolean isSubTask, A2AContext a2aContext
+            boolean isSubTask, Object contextPlaceholder
     ) {
         public ExecutionContextExtended(String agentId, String conversationId, String userMessage, String role, String senderName) {
             this(agentId, conversationId, userMessage, role, senderName, false, null);
@@ -69,29 +74,29 @@ public class AgentExecutionManager {
         executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), context.userMessage(), context.role(), context.senderName(), false, null), eventConsumer, onCompleted, onError);
     }
 
+    public void broadcastSubTaskEvent(String conversationId, InternalCodexEvent event) {
+        Consumer<InternalCodexEvent> consumer = sessionStreams.get(conversationId);
+        if (consumer != null) consumer.accept(event);
+    }
+
     public void executeTaskExtended(
             ExecutionContextExtended context,
             Consumer<InternalCodexEvent> eventConsumer,
             Runnable onCompleted,
             Consumer<Throwable> onError
     ) {
-        A2AContext a2a = (context.a2aContext() != null) ? context.a2aContext() : A2AContext.root(context.agentId(), null);
-        final String curTask = (a2a.getDepth() == 0) ? context.conversationId() : UUID.randomUUID().toString();
+        final String curTaskId = context.isSubTask ? UUID.randomUUID().toString() : context.conversationId();
 
         try {
-            // 加载 Agent
+            if (!context.isSubTask) sessionStreams.put(context.conversationId(), eventConsumer);
+
             AgentEntity agent = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, resolveAgentId(context)));
             AgentConfigEntity config = agentConfigRepository.selectOne(new LambdaQueryWrapper<AgentConfigEntity>().eq(AgentConfigEntity::getConfigId, agent.getConfigId()));
-
-            // 注册初始任务 (正统 A2A)
-            Task initialT = new Task(curTask, context.conversationId(), new TaskStatus(TaskState.WORKING, null, OffsetDateTime.now()), Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
-            a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
-                    .task(initialT).conversationId(context.conversationId()).eventConsumer(eventConsumer).startTime(System.currentTimeMillis()).build());
 
             appendMessage(context.conversationId(), context.role(), context.userMessage(), (context.senderName() != null) ? context.senderName() : "user");
             agentContextManager.onAgentCalled(agent.getAgentId(), context.userMessage(), (context.senderName() != null) ? context.senderName() : "user");
 
-            injectMcp(config, agent.getAgentId(), agent.getConversationId(), a2a, curTask);
+            injectMcpHeaders(config, agent.getAgentId(), agent.getConversationId(), curTaskId);
 
             RunTaskRequest req = RunTaskRequest.newBuilder()
                     .setRequestId(UUID.randomUUID().toString()).setSessionId(agent.getConversationId())
@@ -117,7 +122,7 @@ public class AgentExecutionManager {
                                 if (text.contains("\"id\"") && text.contains("\"status\"")) {
                                     try {
                                         Task t = objectMapper.readValue(text, Task.class);
-                                        if (t.getId() != null) { subTaskCandidate = t; }
+                                        if (t.getId() != null) subTaskCandidate = t;
                                     } catch (Exception ignored) {}
                                 }
                             }
@@ -132,40 +137,34 @@ public class AgentExecutionManager {
                     } catch (Exception ex) { log.error("Next fail", ex); onError.accept(ex); }
                 }
                 @Override
-                public void onError(Throwable t) { a2aTaskRegistry.unregisterTask(curTask); onError.accept(t); }
+                public void onError(Throwable t) { if (!context.isSubTask) sessionStreams.remove(context.conversationId()); onError.accept(t); }
                 @Override
                 public void onCompleted() {
                     if (subTaskCandidate != null) {
-                        log.info("[A2A] Task Suspended: {}", subTaskCandidate.getId());
-                        a2aTaskRegistry.registerTask(A2ATaskRegistry.TaskRecord.builder()
-                                .task(subTaskCandidate).conversationId(context.conversationId())
-                                .onTaskTerminal((Task finished) -> {
-                                    // ⭐ 唤醒：从产物中提取结果
-                                    String resultText = extractResultFromArtifacts(finished);
-                                    log.info("[A2A] Awakened by: {}, resultLen={}", finished.getId(), resultText.length());
-                                    executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "这是委派任务的最终执行结果：\n" + resultText, "user", "System(A2A)", false, a2a), eventConsumer, onCompleted, onError);
-                                }).startTime(System.currentTimeMillis()).build());
+                        if (taskStore instanceof A2AConfig.ObservableTaskStore) {
+                            ((A2AConfig.ObservableTaskStore) taskStore).addTerminalListener(subTaskCandidate.getId(), (finished) -> {
+                                String result = extractResult(finished);
+                                executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), "任务结果：\n" + result, "user", "System", false, null), eventConsumer, onCompleted, onError);
+                            });
+                        }
                     } else {
-                        a2aTaskRegistry.unregisterTask(curTask);
+                        if (!context.isSubTask) sessionStreams.remove(context.conversationId());
                         onCompleted.run();
                     }
                 }
             });
-        } catch (Exception e) { a2aTaskRegistry.unregisterTask(curTask); log.error("Exec error", e); onError.accept(e); }
+        } catch (Exception e) { log.error("Execution error", e); onError.accept(e); }
     }
 
-    private String extractResultFromArtifacts(Task task) {
+    private String extractResult(Task task) {
+        if (task.getArtifacts() == null) return "No result";
         StringBuilder sb = new StringBuilder();
-        if (task.getArtifacts() != null) {
-            for (Artifact art : task.getArtifacts()) {
-                if (art.parts() != null) {
-                    for (Part<?> part : art.parts()) {
-                        if (part instanceof TextPart textPart) sb.append(textPart.getText());
-                    }
-                }
+        for (Artifact art : task.getArtifacts()) {
+            if (art.parts() != null) {
+                for (Part<?> p : art.parts()) if (p instanceof TextPart) sb.append(((TextPart) p).getText());
             }
         }
-        return sb.length() > 0 ? sb.toString() : "(无回复内容)";
+        return sb.toString();
     }
 
     private String resolveAgentId(ExecutionContextExtended c) {
@@ -175,7 +174,7 @@ public class AgentExecutionManager {
         return p.getAgentId();
     }
 
-    private void injectMcp(AgentConfigEntity cfg, String aid, String cid, A2AContext a, String tid) {
+    private void injectMcpHeaders(AgentConfigEntity cfg, String aid, String cid, String tid) {
         try {
             ObjectNode r = (cfg.getMcpConfigJson() == null || cfg.getMcpConfigJson().isEmpty()) ? objectMapper.createObjectNode() : (ObjectNode) objectMapper.readTree(cfg.getMcpConfigJson());
             ObjectNode m = r.has("mcp_servers") ? (ObjectNode) r.get("mcp_servers") : r;
@@ -184,17 +183,16 @@ public class AgentExecutionManager {
                 if (j.isObject()) {
                     ObjectNode h = j.has("http_headers") ? (ObjectNode) j.get("http_headers") : objectMapper.createObjectNode();
                     h.put("X-Agent-ID", aid); h.put("X-Conversation-ID", cid);
-                    if (a != null) { h.put("X-A2A-Trace-ID", a.getTraceId()); h.put("X-A2A-Parent-Task-ID", tid); h.put("X-A2A-Depth", String.valueOf(a.getDepth())); h.put("X-A2A-Origin-Agent-ID", a.getOriginAgentId()); }
+                    h.put("X-A2A-Parent-Task-ID", tid);
                     ((ObjectNode) j).set("http_headers", h);
                 }
             });
             String tk = jwtUtils.generateToken(aid, cid);
             ObjectNode sys = objectMapper.createObjectNode(); sys.put("server_type", "streamable_http"); sys.put("url", websiteUrl + "/mcp/message");
             ObjectNode sh = objectMapper.createObjectNode(); sh.put("Authorization", "Bearer " + tk); sh.put("X-Agent-ID", aid); sh.put("X-Conversation-ID", cid);
-            if (a != null) { sh.put("X-A2A-Trace-ID", a.getTraceId()); sh.put("X-A2A-Depth", String.valueOf(a.getDepth())); }
             sys.set("http_headers", sh); m.set("agentoz_system", sys);
             cfg.setMcpConfigJson(objectMapper.writeValueAsString(r));
-        } catch (Exception e) { log.error("Mcp fail", e); }
+        } catch (Exception ignored) {}
     }
 
     private void collect(InternalCodexEvent e, StringBuilder b) {
@@ -227,7 +225,8 @@ public class AgentExecutionManager {
 
     private ObjectNode msg(String s, JsonNode n) {
         ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "AgentMessage"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString());
-        ArrayNode c = objectMapper.createArrayNode(); for (JsonNode x : n.path("content")) { if (x.has("text")) { ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", x.get("text").asText()); c.add(t); } }
+        ArrayNode c = objectMapper.createArrayNode();
+        for (JsonNode x : n.path("content")) { if (x.has("text")) { ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", x.get("text").asText()); c.add(t); } }
         i.set("content", c); return i;
     }
 
