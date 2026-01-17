@@ -170,8 +170,15 @@ public class AgentExecutionManager {
                             agentRepository.updateById(agent);
                         }
                         eventConsumer.accept(e);
-                    } catch (RuntimeException ex) { if (!"A2A_INTERRUPT".equals(ex.getMessage())) { log.error("Next fail", ex); onError.accept(ex); } }
-                    catch (Exception ex) { log.error("Next fail", ex); onError.accept(ex); }
+                    } catch (RuntimeException ex) {
+                        if (!"A2A_INTERRUPT".equals(ex.getMessage())) {
+                            log.error("Next fail", ex);
+                            // ⚠️ 修改：只记录日志，不调用 onError，避免中断整个流
+                        }
+                    } catch (Exception ex) {
+                        log.error("Next fail", ex);
+                        // ⚠️ 修改：只记录日志，不调用 onError，避免中断整个流
+                    }
                 }
 
                 @Override

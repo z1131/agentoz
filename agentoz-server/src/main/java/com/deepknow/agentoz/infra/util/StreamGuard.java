@@ -43,14 +43,11 @@ public class StreamGuard {
 
     /**
      * 发送错误响应并关闭流
+     * ⚠️ 修改：使用 onError 代替 onNext + onCompleted，确保错误通过正确的通道传递
      */
     public static void sendError(StreamObserver<TaskResponse> observer, String code, String msg) {
         try {
-            TaskResponse resp = new TaskResponse();
-            resp.setStatus("ERROR");
-            resp.setErrorMessage(String.format("[%s] %s", code, msg));
-            observer.onNext(resp);
-            observer.onCompleted();
+            observer.onError(new RuntimeException(String.format("[%s] %s", code, msg)));
         } catch (Exception ex) {
             log.error("发送错误响应失败 (流可能已关闭)", ex);
         }
