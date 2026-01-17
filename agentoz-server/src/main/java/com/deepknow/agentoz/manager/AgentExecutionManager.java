@@ -143,6 +143,7 @@ public class AgentExecutionManager {
                         InternalCodexEvent e = InternalCodexEventConverter.toInternalEvent(p);
                         if (e == null) return;
                         e.setSenderName(agent.getAgentName());
+                        e.setAgentId(agent.getAgentId());
                         persist(context.conversationId(), agent.getAgentId(), agent.getAgentName(), e);
                         collectTextRobustly(e, sb);
                         
@@ -192,20 +193,21 @@ public class AgentExecutionManager {
                         store.addTerminalListener(taskId, (finished) -> {
                             String result = extractResult(finished);
                             log.info("[A2A] 委派任务完成，发送结果事件: conversationId={}, taskId={}", context.conversationId(), taskId);
-                            InternalCodexEvent resultEvent = createResultEvent(result, context.conversationId());
+                            InternalCodexEvent resultEvent = createResultEvent(result, context.conversationId(), context.agentId());
                             eventConsumer.accept(resultEvent);
                         });
                     }
                 }
 
-                private InternalCodexEvent createResultEvent(String result, String conversationId) {
+                private InternalCodexEvent createResultEvent(String result, String conversationId, String agentId) {
                     String escapedResult = result.replace("\"", "\\\"").replace("\n", "\\n");
                     String rawJson = String.format(
                         "{\"type\":\"a2a_delegation_completed\",\"conversationId\":\"%s\",\"content\":{\"text\":\"%s\"}}",
                         conversationId, escapedResult
                     );
                     return InternalCodexEvent.processing("a2a_delegation_completed", rawJson)
-                            .setSenderName("System(A2A)");
+                            .setSenderName("System(A2A)")
+                            .setAgentId(agentId);
                 }
             });
         } catch (Exception e) { log.error("Execution error", e); onError.accept(e); }

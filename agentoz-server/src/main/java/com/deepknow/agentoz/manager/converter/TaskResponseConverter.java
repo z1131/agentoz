@@ -4,6 +4,7 @@ import com.deepknow.agentoz.api.dto.TaskResponse;
 import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -38,10 +39,11 @@ public class TaskResponseConverter {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
-     * 转换 InternalCodexEvent → TaskResponse
-     *
-     * <p>优化策略：直接透传 Codex 原始事件，同时保留旧字段以兼容现有代码</p>
-     */
+      * 转换 InternalCodexEvent → TaskResponse
+      *
+      * <p>优化策略：直接透传 Codex 原始事件，同时保留旧字段以兼容现有代码</p>
+      * <p>⚠️ 修改：原始事件 JSON 中添加 agentId 和 senderName 字段</p>
+      */
     public static TaskResponse toTaskResponse(InternalCodexEvent event) {
         if (event == null) {
             return null;
@@ -61,13 +63,17 @@ public class TaskResponseConverter {
             }
             case FINISHED -> {
                 dto.setUpdatedRollout(event.getUpdatedRollout());
+                // 添加 stream_completed 事件，让前端知道流已结束
+                List<String> events = new ArrayList<>();
+                events.add("{\"type\":\"stream_completed\"}");
+                dto.setRawCodexEvents(events);
             }
             case PROCESSING -> {
-                // ✅ 核心：直接透传 Codex 原始事件
+                // ✅ 核心：直接透传 Codex 原始事件，并添加 agentId 和 senderName
                 if (event.getRawEventJson() != null) {
-                    // 使用 ArrayList 替代 List.of()，避免 Hessian2 序列化兼容性问题
+                    String enrichedEvent = enrichEventWithAgentInfo(event.getRawEventJson(), event.getAgentId(), event.getSenderName());
                     List<String> list = new ArrayList<>();
-                    list.add(event.getRawEventJson());
+                    list.add(enrichedEvent);
                     dto.setRawCodexEvents(list);
                 }
 
@@ -87,6 +93,26 @@ public class TaskResponseConverter {
         }
 
         return dto;
+    }
+
+    /**
+     * 在原始事件 JSON 中添加 agentId 和 senderName 字段
+     */
+    private static String enrichEventWithAgentInfo(String rawJson, String agentId, String senderName) {
+        try {
+            JsonNode node = objectMapper.readTree(rawJson);
+            ObjectNode obj = (ObjectNode) node;
+            if (agentId != null && !agentId.isEmpty()) {
+                obj.put("agentId", agentId);
+            }
+            if (senderName != null && !senderName.isEmpty()) {
+                obj.put("agentName", senderName);
+            }
+            return obj.toString();
+        } catch (Exception e) {
+            log.warn("enrichment event JSON failed: {}", e.getMessage());
+            return rawJson;
+        }
     }
 
     /**

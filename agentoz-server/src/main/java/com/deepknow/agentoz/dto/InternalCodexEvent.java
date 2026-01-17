@@ -80,6 +80,12 @@ public class InternalCodexEvent {
     private String senderName;
 
     /**
+     * 事件发送者 Agent ID (e.g. "agent-123456")
+     * 用于前端精确识别 agent
+     */
+    private String agentId;
+
+    /**
      * 标准化展示项 (JSON 字符串列表)
      * 用于直接透传给前端展示，格式与 historyContext 中存储的一致
      */
