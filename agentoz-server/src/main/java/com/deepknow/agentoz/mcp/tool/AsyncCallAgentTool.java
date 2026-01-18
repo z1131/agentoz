@@ -288,10 +288,13 @@ public class AsyncCallAgentTool {
                         task,
                         "assistant",
                         "AsyncCallAgent",
-                        true
+                        true  // ← 标记为子任务
                     ),
                     event -> {
-                        // 收集结果
+                        // 1. 将事件回传到前端 SSE 连接（关键！）
+                        agentExecutionManager.broadcastSubTaskEvent(conversationId, event);
+
+                        // 2. 同时收集结果用于保存到数据库
                         if (event != null) {
                             String text = extractTextFromEvent(event);
                             if (text != null && !text.isEmpty()) {
