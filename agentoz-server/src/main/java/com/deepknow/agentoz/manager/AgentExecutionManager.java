@@ -301,14 +301,8 @@ public class AgentExecutionManager {
                                 log.info("✅ [FINISHED] 已持久化 updatedRollout: agentId={}, size={} bytes, updateResult={}",
                                     agent.getAgentId(), e.getUpdatedRollout().length, updateResult);
 
-                                // 验证保存是否成功
-                                AgentEntity savedAgent = agentRepository.selectById(agent.getAgentId());
-                                if (savedAgent != null && savedAgent.hasActiveContext()) {
-                                    log.info("✅ [FINISHED] 验证成功: activeContext 长度={}",
-                                        savedAgent.getActiveContext().length());
-                                } else {
-                                    log.error("❌ [FINISHED] 验证失败: activeContext 为空!");
-                                }
+                                // ⚠️ 跳过验证，因为后续的 setAgentState 可能会再次更新 Agent
+                                // 验证逻辑移到最后，在所有状态更新完成后进行
                             } else {
                                 log.warn("⚠️  [FINISHED] updatedRollout 为空！agentId={}, eventType={}",
                                     agent.getAgentId(), e.getEventType());
@@ -316,6 +310,21 @@ public class AgentExecutionManager {
 
                             // 替换原有的 updateOutputState，使用 ContextManager 统一管理状态 (设置为 IDLE)
                             agentContextManager.onAgentResponse(agent.getAgentId(), sb.toString());
+
+                            // ⚠️ 关键修复：在状态更新完成后，验证 activeContext 是否仍然存在
+                            // 因为 setAgentState 可能会触发额外的更新
+                            try {
+                                Thread.sleep(50); // 等待可能的并发操作完成
+                                AgentEntity finalAgent = agentRepository.selectById(agent.getAgentId());
+                                if (finalAgent != null && finalAgent.hasActiveContext()) {
+                                    log.info("✅ [FINISHED-最终验证] activeContext 保存成功: agentId={}, length={}",
+                                        agent.getAgentId(), finalAgent.getActiveContext().length());
+                                } else {
+                                    log.error("❌ [FINISHED-最终验证] activeContext 丢失! agentId={}", agent.getAgentId());
+                                }
+                            } catch (Exception ex) {
+                                log.warn("⚠️ [FINISHED] 最终验证失败: agentId={}, error={}", agent.getAgentId(), ex.getMessage());
+                            }
                         } else {
                             // 处理过程中的事件更新 (Thinking, Call Tool...)
                             agentContextManager.onCodexEvent(agent.getAgentId(), e);

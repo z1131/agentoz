@@ -264,7 +264,12 @@ public class AsyncCallAgentTool {
      */
     @Async
     protected void executeAsync(AsyncTaskEntity taskEntity, AgentEntity targetAgent) {
+        log.info("🔄 [AsyncCallAgent] executeAsync 方法被调用: taskId={}, agentId={}, thread={}",
+            taskEntity.getTaskId(), taskEntity.getAgentId(), Thread.currentThread().getName());
+
         CompletableFuture.runAsync(() -> {
+            log.info("🧵 [AsyncCallAgent] CompletableFuture.runAsync 开始执行: taskId={}, thread={}",
+                taskEntity.getTaskId(), Thread.currentThread().getName());
             String taskId = taskEntity.getTaskId();
             String agentId = taskEntity.getAgentId();
             String conversationId = taskEntity.getConversationId();
