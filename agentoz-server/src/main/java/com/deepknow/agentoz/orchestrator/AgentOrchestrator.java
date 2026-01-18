@@ -72,6 +72,24 @@ public class AgentOrchestrator implements AgentExecutionService {
         String agentId = request.getAgentId();
         String userMessage = request.getMessage();
 
+        // Fix: 如果 agentId 为空，尝试查找该会话的主 Agent
+        if (agentId == null || agentId.isEmpty()) {
+            AgentEntity primaryAgent = agentRepository.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentEntity>()
+                            .eq(AgentEntity::getConversationId, conversationId)
+                            .eq(AgentEntity::getIsPrimary, true)
+            );
+
+            if (primaryAgent != null) {
+                agentId = primaryAgent.getAgentId();
+            } else {
+                String errorMsg = String.format("AgentId is missing and no primary agent found for conversation: %s", conversationId);
+                log.error("[Orchestrator] {}", errorMsg);
+                responseObserver.onError(new RuntimeException(errorMsg));
+                return;
+            }
+        }
+
         log.info("[Orchestrator] 收到任务请求: convId={}, agentId={}", conversationId, agentId);
 
         try {
