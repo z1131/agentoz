@@ -287,9 +287,14 @@ public class AgentExecutionManager {
                                 return;
                             }
 
-                            // 正常完成
-                            if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) agent.setActiveContextFromBytes(e.getUpdatedRollout());
-                            
+                            // 正常完成 - 持久化 updatedRollout
+                            if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) {
+                                agent.setActiveContextFromBytes(e.getUpdatedRollout());
+                                agentRepository.updateById(agent);
+                                log.info("✅ [onNext-FINISHED] 已持久化 updatedRollout: agentId={}, size={} bytes",
+                                    agent.getAgentId(), e.getUpdatedRollout().length);
+                            }
+
                             // 替换原有的 updateOutputState，使用 ContextManager 统一管理状态 (设置为 IDLE)
                             agentContextManager.onAgentResponse(agent.getAgentId(), sb.toString());
                         } else {
