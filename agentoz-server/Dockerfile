@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM maven:3.9.6-eclipse-temurin-17 AS build
+FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
 WORKDIR /app
 
 # 1. Copy root pom
@@ -40,7 +40,7 @@ EOF
 RUN mvn clean package -DskipTests -pl agentoz-server -am -s /root/.m2/settings.xml
 
 # Stage 2: Run
-FROM eclipse-temurin:17-jre-jammy
+FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 COPY --from=build /app/agentoz-server/target/*.jar app.jar
 ENV TZ=Asia/Shanghai
