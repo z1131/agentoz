@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Collections;
 
 @Slf4j
-@Component
+//@Component  // 暂时注释，使用 AsyncCallAgentTool 替代
 public class CallAgentTool {
 
     @Autowired
@@ -38,7 +38,7 @@ public class CallAgentTool {
 
     public static final String A2A_DELEGATED_MARKER = "[A2A_TASK_DELEGATED:";
 
-    @AgentTool(name = "call_agent", description = "异步委派任务")
+    // @AgentTool(name = "call_agent", description = "异步委派任务")  // 暂时注释，使用 AsyncCallAgentTool 替代
     public String callAgent(
             McpTransportContext ctx,
             @AgentParam(name = "targetAgentName", value = "目标智能体") String targetAgentName,
