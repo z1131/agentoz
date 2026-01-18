@@ -28,6 +28,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.protobuf.ByteString;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.apache.dubbo.common.stream.StreamObserver;
 import org.springframework.stereotype.Component;
 
@@ -58,6 +59,47 @@ public class AgentExecutionManager {
             .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
     private final Map<String, Consumer<InternalCodexEvent>> sessionStreams = new ConcurrentHashMap<>();
+
+    @Autowired(required = false)
+    private com.deepknow.agentoz.service.RedisAgentTaskQueue redisAgentTaskQueue;
+
+    /**
+     * 检查 Agent 是否正在执行任务
+     *
+     * @param agentId Agent ID
+     * @return true 如果 Agent 正在执行任务，false 如果空闲
+     */
+    public boolean isAgentBusy(String agentId) {
+        // 优先使用 Redis（如果可用）
+        if (redisAgentTaskQueue != null) {
+            return redisAgentTaskQueue.isAgentBusy(agentId);
+        }
+        // 否则返回 false（降级处理，允许多任务并发）
+        return false;
+    }
+
+    /**
+     * 标记 Agent 开始执行任务
+     *
+     * @param agentId Agent ID
+     * @param taskId 任务 ID
+     */
+    public void markAgentBusy(String agentId, String taskId) {
+        if (redisAgentTaskQueue != null) {
+            redisAgentTaskQueue.markAgentBusy(agentId, taskId);
+        }
+    }
+
+    /**
+     * 标记 Agent 完成任务（空闲）
+     *
+     * @param agentId Agent ID
+     */
+    public void markAgentFree(String agentId) {
+        if (redisAgentTaskQueue != null) {
+            redisAgentTaskQueue.markAgentFree(agentId);
+        }
+    }
 
     public record ExecutionContext(String agentId, String conversationId, String userMessage, String role, String senderName) {}
 
@@ -125,6 +167,11 @@ public class AgentExecutionManager {
             agentContextManager.onAgentCalled(agent.getAgentId(), context.userMessage(), (context.senderName() != null) ? context.senderName() : "user");
 
             injectMcpHeaders(config, agent.getAgentId(), agent.getConversationId(), curTaskId);
+
+            // 标记 Agent 为忙碌（仅在非子任务时）
+            if (!context.isSubTask) {
+                markAgentBusy(agent.getAgentId(), curTaskId);
+            }
 
             RunTaskRequest req = RunTaskRequest.newBuilder()
                     .setRequestId(UUID.randomUUID().toString()).setSessionId(agent.getConversationId())
@@ -210,6 +257,8 @@ public class AgentExecutionManager {
                 public void onError(Throwable t) {
                     if (!isInterrupted) {
                         if (!context.isSubTask) sessionStreams.remove(context.conversationId());
+                        // 标记 Agent 为空闲
+                        markAgentFree(context.agentId());
                         onError.accept(t);
                     } else {
                         log.info("[A2A] StreamObserver 错误 (预期行为): conversationId={}", context.conversationId());
@@ -220,6 +269,8 @@ public class AgentExecutionManager {
                 public void onCompleted() {
                     if (!isInterrupted) {
                         if (!context.isSubTask) sessionStreams.remove(context.conversationId());
+                        // 标记 Agent 为空闲
+                        markAgentFree(context.agentId());
                         onCompleted.run();
                     } else {
                         log.info("[A2A] StreamObserver 完成 (预期行为): conversationId={}", context.conversationId());

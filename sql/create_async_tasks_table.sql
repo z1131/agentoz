@@ -1,0 +1,26 @@
+-- 创建异步任务表
+CREATE TABLE IF NOT EXISTS `async_tasks` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键 ID',
+  `task_id` VARCHAR(64) NOT NULL COMMENT '任务唯一标识（UUID）',
+  `agent_id` VARCHAR(64) NOT NULL COMMENT '被调用的 Agent ID',
+  `agent_name` VARCHAR(255) NOT NULL COMMENT '被调用的 Agent 名称',
+  `conversation_id` VARCHAR(64) NOT NULL COMMENT '所属会话 ID',
+  `caller_agent_id` VARCHAR(64) DEFAULT NULL COMMENT '调用者 Agent ID（发起调用的 Agent）',
+  `task_description` TEXT NOT NULL COMMENT '任务描述',
+  `status` ENUM('SUBMITTED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED') NOT NULL DEFAULT 'SUBMITTED' COMMENT '任务状态',
+  `priority` VARCHAR(10) NOT NULL DEFAULT 'normal' COMMENT '任务优先级（high/normal/low）',
+  `result` LONGTEXT DEFAULT NULL COMMENT '任务执行结果（TEXT 类型，存储完整结果）',
+  `error_message` TEXT DEFAULT NULL COMMENT '错误信息（如果失败）',
+  `submit_time` DATETIME NOT NULL COMMENT '提交时间',
+  `start_time` DATETIME DEFAULT NULL COMMENT '开始执行时间',
+  `complete_time` DATETIME DEFAULT NULL COMMENT '完成时间',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_task_id` (`task_id`),
+  KEY `idx_agent_id` (`agent_id`),
+  KEY `idx_conversation_id` (`conversation_id`),
+  KEY `idx_status` (`status`),
+  KEY `idx_submit_time` (`submit_time`),
+  KEY `idx_agent_status` (`agent_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='异步任务表';
