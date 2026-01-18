@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Component
@@ -59,6 +60,9 @@ public class AgentExecutionManager {
             .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
     private final Map<String, Consumer<InternalCodexEvent>> sessionStreams = new ConcurrentHashMap<>();
+
+    // 跟踪每个会话的活跃子任务数量
+    private final Map<String, AtomicInteger> activeSubTasks = new ConcurrentHashMap<>();
 
     @Autowired(required = false)
     private com.deepknow.agentoz.service.RedisAgentTaskQueue redisAgentTaskQueue;
@@ -138,6 +142,35 @@ public class AgentExecutionManager {
             // 输出所有 conversationId 帮助调试
             if (log.isDebugEnabled()) {
                 log.debug("当前 sessionStreams 中的 keys: {}", sessionStreams.keySet());
+            }
+        }
+    }
+
+    /**
+     * 增加活跃子任务计数
+     * 用于异步调用场景，防止父任务完成时关闭 SSE 连接
+     */
+    public void incrementActiveSubTasks(String conversationId) {
+        activeSubTasks.computeIfAbsent(conversationId, k -> new AtomicInteger(0)).incrementAndGet();
+        log.info("➕ [incrementActiveSubTasks] convId={}, activeCount={}",
+            conversationId, activeSubTasks.get(conversationId).get());
+    }
+
+    /**
+     * 减少活跃子任务计数
+     * 当子任务完成时调用，如果计数归零则可以关闭 SSE 连接
+     */
+    public void decrementActiveSubTasks(String conversationId) {
+        AtomicInteger counter = activeSubTasks.get(conversationId);
+        if (counter != null) {
+            int newCount = counter.decrementAndGet();
+            log.info("➖ [decrementActiveSubTasks] convId={}, activeCount={}",
+                conversationId, newCount);
+
+            if (newCount <= 0) {
+                // 所有子任务都完成了
+                activeSubTasks.remove(conversationId);
+                log.info("✅ [decrementActiveSubTasks] 所有子任务完成，清理计数: convId={}", conversationId);
             }
         }
     }
@@ -277,10 +310,24 @@ public class AgentExecutionManager {
                 @Override
                 public void onError(Throwable t) {
                     if (!isInterrupted) {
-                        if (!context.isSubTask) sessionStreams.remove(context.conversationId());
-                        // 标记 Agent 为空闲
-                        markAgentFree(context.agentId());
-                        onError.accept(t);
+                        if (!context.isSubTask) {
+                            // 检查是否还有活跃的子任务
+                            AtomicInteger subTaskCount = activeSubTasks.get(context.conversationId());
+                            if (subTaskCount != null && subTaskCount.get() > 0) {
+                                log.info("⏳ [onError] 父任务错误，但还有 {} 个子任务活跃，延迟关闭 SSE: convId={}",
+                                    subTaskCount.get(), context.conversationId());
+                                markAgentFree(context.agentId());
+                                onError.accept(t);
+                                return;
+                            }
+
+                            // 没有活跃子任务，正常关闭
+                            sessionStreams.remove(context.conversationId());
+                            activeSubTasks.remove(context.conversationId());
+                            // 标记 Agent 为空闲
+                            markAgentFree(context.agentId());
+                            onError.accept(t);
+                        }
                     } else {
                         log.info("[A2A] StreamObserver 错误 (预期行为): conversationId={}", context.conversationId());
                     }
@@ -289,10 +336,29 @@ public class AgentExecutionManager {
                 @Override
                 public void onCompleted() {
                     if (!isInterrupted) {
-                        if (!context.isSubTask) sessionStreams.remove(context.conversationId());
-                        // 标记 Agent 为空闲
-                        markAgentFree(context.agentId());
-                        onCompleted.run();
+                        // 只在非子任务时处理
+                        if (!context.isSubTask) {
+                            // 检查是否还有活跃的子任务
+                            AtomicInteger subTaskCount = activeSubTasks.get(context.conversationId());
+                            if (subTaskCount != null && subTaskCount.get() > 0) {
+                                log.info("⏳ [onCompleted] 父任务完成，但还有 {} 个子任务活跃，延迟关闭 SSE: convId={}",
+                                    subTaskCount.get(), context.conversationId());
+                                // 不立即关闭 SSE，等所有子任务完成
+                                // 标记 Agent 为空闲（允许父任务完成）
+                                markAgentFree(context.agentId());
+                                onCompleted.run();
+                                return;
+                            }
+
+                            // 没有活跃子任务，正常关闭
+                            log.info("✅ [onCompleted] 父任务完成，无活跃子任务，关闭 SSE: convId={}",
+                                context.conversationId());
+                            sessionStreams.remove(context.conversationId());
+                            activeSubTasks.remove(context.conversationId());
+                            // 标记 Agent 为空闲
+                            markAgentFree(context.agentId());
+                            onCompleted.run();
+                        }
                     } else {
                         log.info("[A2A] StreamObserver 完成 (预期行为): conversationId={}", context.conversationId());
                     }

@@ -278,6 +278,9 @@ public class AsyncCallAgentTool {
 
                 log.info("▶️  任务开始执行: taskId={}, agentId={}", taskId, agentId);
 
+                // 关键：增加活跃子任务计数，防止父任务关闭 SSE 连接
+                agentExecutionManager.incrementActiveSubTasks(conversationId);
+
                 // 执行 Agent
                 StringBuilder resultBuilder = new StringBuilder();
 
@@ -321,6 +324,9 @@ public class AsyncCallAgentTool {
                         log.info("✅ 任务完成: taskId={}, resultLength={}",
                             taskId, result.length());
 
+                        // 关键：减少活跃子任务计数
+                        agentExecutionManager.decrementActiveSubTasks(conversationId);
+
                         // 处理队列中的下一个任务
                         redisAgentTaskQueue.processNextTask(agentId,
                             (nextTaskId) -> {
@@ -339,6 +345,9 @@ public class AsyncCallAgentTool {
 
                         log.error("❌ 任务失败: taskId={}, error={}",
                             taskId, throwable.getMessage(), throwable);
+
+                        // 关键：减少活跃子任务计数（即使失败也要减少）
+                        agentExecutionManager.decrementActiveSubTasks(conversationId);
 
                         // 处理队列中的下一个任务
                         redisAgentTaskQueue.processNextTask(agentId,
@@ -359,6 +368,9 @@ public class AsyncCallAgentTool {
                 taskEntity.setErrorMessage(e.getMessage());
                 taskEntity.setCompleteTime(LocalDateTime.now());
                 asyncTaskRepository.updateById(taskEntity);
+
+                // 关键：减少活跃子任务计数（即使异常也要减少）
+                agentExecutionManager.decrementActiveSubTasks(conversationId);
 
                 // 处理队列中的下一个任务
                 redisAgentTaskQueue.processNextTask(agentId,
