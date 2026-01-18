@@ -71,6 +71,13 @@
         </dependencies>
     </dependencyManagement>
 
+    <repositories>
+        <repository>
+            <id>github-agentoz</id>
+            <url>https://maven.pkg.github.com/z1131/agentoz</url>
+        </repository>
+    </repositories>
+
     <distributionManagement>
         <repository>
             <id>github-agentoz</id>
