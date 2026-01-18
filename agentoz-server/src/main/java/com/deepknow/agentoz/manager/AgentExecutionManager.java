@@ -118,7 +118,28 @@ public class AgentExecutionManager {
 
     public void broadcastSubTaskEvent(String conversationId, InternalCodexEvent event) {
         Consumer<InternalCodexEvent> consumer = sessionStreams.get(conversationId);
-        if (consumer != null) consumer.accept(event);
+
+        log.info("📡 [broadcastSubTaskEvent] convId={}, eventType={}, hasConsumer={}, senderName={}",
+            conversationId, event.getEventType(), consumer != null, event.getSenderName());
+
+        if (consumer != null) {
+            try {
+                consumer.accept(event);
+                log.info("✅ [broadcastSubTaskEvent] 事件已发送到前端: convId={}, eventType={}",
+                    conversationId, event.getEventType());
+            } catch (Exception e) {
+                log.error("❌ [broadcastSubTaskEvent] 发送事件失败: convId={}, error={}",
+                    conversationId, e.getMessage(), e);
+            }
+        } else {
+            log.warn("⚠️  [broadcastSubTaskEvent] 找不到 SSE 连接: convId={}, 当前sessionStreams大小={}",
+                conversationId, sessionStreams.size());
+
+            // 输出所有 conversationId 帮助调试
+            if (log.isDebugEnabled()) {
+                log.debug("当前 sessionStreams 中的 keys: {}", sessionStreams.keySet());
+            }
+        }
     }
 
     /**

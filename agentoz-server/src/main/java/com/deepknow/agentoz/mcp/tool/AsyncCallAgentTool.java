@@ -291,10 +291,18 @@ public class AsyncCallAgentTool {
                         true  // ← 标记为子任务
                     ),
                     event -> {
-                        // 1. 将事件回传到前端 SSE 连接（关键！）
+                        // 关键修复：子任务需要通过父任务的 SSE 连接发送事件
+                        // 由于 executeTaskExtended 的 isSubTask=true 不会注册 sessionStreams，
+                        // 我们需要手动获取父任务的 SSE 连接并发送事件
+
+                        log.info("📡 [AsyncCallAgent] 子任务事件: convId={}, eventType={}, senderName={}",
+                            conversationId, event.getEventType(), event.getSenderName());
+
+                        // 直接使用 AgentExecutionManager 的 broadcastSubTaskEvent 方法
+                        // 这个方法会从 sessionStreams 获取父任务的 SSE 连接
                         agentExecutionManager.broadcastSubTaskEvent(conversationId, event);
 
-                        // 2. 同时收集结果用于保存到数据库
+                        // 同时收集结果用于保存到数据库
                         if (event != null) {
                             String text = extractTextFromEvent(event);
                             if (text != null && !text.isEmpty()) {
