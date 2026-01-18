@@ -317,26 +317,45 @@ public class AgentExecutionManager {
         }
     }
 
-    private ObjectNode createAgentMsg(String s, JsonNode n) {
-        ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "AgentMessage"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString());
-        ArrayNode c = objectMapper.createArrayNode();
-        for (JsonNode x : n.path("content")) { if (x.has("text")) { ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", x.get("text").asText()); c.add(t); } }
-        i.set("content", c); return i;
+    private ObjectNode createAgentMsg(String senderName, JsonNode n) {
+        ObjectNode item = objectMapper.createObjectNode();
+        item.set("item", n);
+        item.put("type", "agent_message");
+        item.put("agentId", n.has("sender_id") ? n.get("sender_id").asText() : "");
+        item.put("agentName", senderName);
+        return item;
     }
 
-    private ObjectNode createToolItem(String s, JsonNode n) {
-        JsonNode t = n.path("item"); if (t.isMissingNode()) return null;
-        ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "McpToolCall"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString());
-        i.put("tool", t.path("name").asText("unknown")); i.set("arguments", t.path("arguments")); i.set("result", t.path("result")); return i;
+    private ObjectNode createToolItem(String senderName, JsonNode n) {
+        JsonNode itemNode = n.path("item");
+        if (itemNode.isMissingNode()) return null;
+        ObjectNode item = objectMapper.createObjectNode();
+        item.set("item", itemNode);
+        item.put("type", "item.completed");
+        item.put("agentId", n.has("sender_id") ? n.get("sender_id").asText() : "");
+        item.put("agentName", senderName);
+        return item;
     }
 
-    private ObjectNode createReasoningItem(String s, JsonNode n) {
-        ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "AgentMessage"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString());
-        ArrayNode c = objectMapper.createArrayNode(); ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", "> [Thinking] " + n.path("content").asText("")); c.add(t); i.set("content", c); return i;
+    private ObjectNode createReasoningItem(String senderName, JsonNode n) {
+        ObjectNode item = objectMapper.createObjectNode();
+        ObjectNode reasoningContent = objectMapper.createObjectNode();
+        reasoningContent.put("type", "text");
+        reasoningContent.put("text", n.path("content").asText(""));
+        item.set("item", reasoningContent);
+        item.put("type", "agent_reasoning");
+        item.put("agentId", n.has("sender_id") ? n.get("sender_id").asText() : "");
+        item.put("agentName", senderName);
+        return item;
     }
 
-    private ObjectNode createGenericItem(String s, JsonNode n, String eventType) {
-        ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "CodexEvent"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString()); i.put("eventType", eventType); i.set("rawEvent", n); return i;
+    private ObjectNode createGenericItem(String senderName, JsonNode n, String eventType) {
+        ObjectNode item = objectMapper.createObjectNode();
+        item.set("item", n);
+        item.put("type", eventType);
+        item.put("agentId", n.has("sender_id") ? n.get("sender_id").asText() : "");
+        item.put("agentName", senderName);
+        return item;
     }
 
     private void appendHistoryItem(String cid, ObjectNode i) {
@@ -345,15 +364,27 @@ public class AgentExecutionManager {
             if (c == null) return;
             ArrayNode h = (c.getHistoryContext() == null || c.getHistoryContext().isEmpty() || "null".equals(c.getHistoryContext())) ? objectMapper.createArrayNode() : (ArrayNode) objectMapper.readTree(c.getHistoryContext());
             h.add(i); c.setHistoryContext(objectMapper.writeValueAsString(h));
-            if ("AgentMessage".equals(i.get("type").asText())) { c.setLastMessageContent(trunc(i.path("content").path(0).path("text").asText(""), 500)); c.setLastMessageType("assistant"); }
+            if ("agent_message".equals(i.get("type").asText())) {
+                String text = i.path("item").path("text").asText("");
+                c.setLastMessageContent(trunc(text, 500)); c.setLastMessageType("assistant");
+            }
             c.setLastMessageAt(LocalDateTime.now()); c.setMessageCount((c.getMessageCount() != null ? c.getMessageCount() : 0) + 1);
             conversationRepository.updateById(c);
         } catch (Exception ignored) {}
     }
 
-    private void appendMessage(String cid, String r, String ct, String s) {
-        ObjectNode i = objectMapper.createObjectNode(); i.put("id", UUID.randomUUID().toString()); i.put("type", "assistant".equals(r) ? "AgentMessage" : "UserMessage"); i.put("sender", s); i.put("timestamp", LocalDateTime.now().toString());
-        ArrayNode a = objectMapper.createArrayNode(); ObjectNode t = objectMapper.createObjectNode(); t.put("type", "text"); t.put("text", ct); a.add(t); i.set("content", a); appendHistoryItem(cid, i);
+    private void appendMessage(String cid, String role, String contentText, String senderName) {
+        ObjectNode content = objectMapper.createObjectNode();
+        content.put("type", "text");
+        content.put("text", contentText);
+
+        ObjectNode item = objectMapper.createObjectNode();
+        item.set("item", content);
+        item.put("type", "agent_message");
+        item.put("agentId", "");
+        item.put("agentName", senderName);
+
+        appendHistoryItem(cid, item);
     }
 
     private String trunc(String t, int m) { if (t == null) return null; return t.length() <= m ? t : t.substring(0, m) + "..."; }
