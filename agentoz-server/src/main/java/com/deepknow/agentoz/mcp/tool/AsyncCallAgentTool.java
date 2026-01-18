@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.deepknow.agentoz.enums.AsyncTaskStatus;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.infra.repo.AsyncTaskRepository;
-import com.deepknow.agentoz.manager.AgentExecutionManager;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.model.AsyncTaskEntity;
 import com.deepknow.agentoz.orchestrator.AgentOrchestrator;
@@ -15,13 +14,9 @@ import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * 异步调用 Agent 工具
@@ -83,11 +78,8 @@ import java.util.concurrent.CompletableFuture;
 @Component
 public class AsyncCallAgentTool {
 
-    @Autowired(required = false)
-    private AgentOrchestrator orchestrator;
-
     @Autowired
-    private AgentExecutionManager agentExecutionManager;
+    private AgentOrchestrator orchestrator;
 
     @Autowired
     private AgentRepository agentRepository;
@@ -156,98 +148,41 @@ public class AsyncCallAgentTool {
                 return createErrorResponse("找不到目标 Agent: " + targetAgentName);
             }
 
-            // 使用 Orchestrator 提交子任务
-            if (orchestrator != null) {
-                log.info("🎯 [AsyncCallAgent] 通过 Orchestrator 提交子任务: target={}", targetAgentName);
+            // 通过 Orchestrator 提交子任务
+            log.info("🎯 [AsyncCallAgent] 通过 Orchestrator 提交子任务: target={}", targetAgentName);
 
-                // 获取或创建父任务 ID
-                String parentTaskId = "main-" + conversationId;
+            // 获取或创建父任务 ID
+            String parentTaskId = "main-" + conversationId;
 
-                // 通过 Orchestrator 提交任务（自动处理队列和执行）
-                String taskId = orchestrator.submitSubTask(
-                    conversationId,
-                    parentTaskId,
-                    targetAgent.getAgentId(),
-                    targetAgentName,
-                    task,
-                    priority
-                );
+            // 通过 Orchestrator 提交任务（自动处理队列和执行）
+            String taskId = orchestrator.submitSubTask(
+                conversationId,
+                parentTaskId,
+                targetAgent.getAgentId(),
+                targetAgentName,
+                task,
+                priority
+            );
 
-                // 创建任务记录用于状态查询
-                AsyncTaskEntity taskEntity = AsyncTaskEntity.builder()
-                    .taskId(taskId)
-                    .agentId(targetAgent.getAgentId())
-                    .agentName(targetAgentName)
-                    .conversationId(conversationId)
-                    .callerAgentId(callerAgentId)
-                    .taskDescription(task)
-                    .priority(priority)
-                    .parentTaskId(parentTaskId)
-                    .status(AsyncTaskStatus.SUBMITTED)
-                    .submitTime(LocalDateTime.now())
-                    .build();
+            // 创建任务记录用于状态查询
+            AsyncTaskEntity taskEntity = AsyncTaskEntity.builder()
+                .taskId(taskId)
+                .agentId(targetAgent.getAgentId())
+                .agentName(targetAgentName)
+                .conversationId(conversationId)
+                .callerAgentId(callerAgentId)
+                .taskDescription(task)
+                .priority(priority)
+                .parentTaskId(parentTaskId)
+                .status(AsyncTaskStatus.SUBMITTED)
+                .submitTime(LocalDateTime.now())
+                .build();
 
-                asyncTaskRepository.insert(taskEntity);
+            asyncTaskRepository.insert(taskEntity);
 
-                log.info("✅ [AsyncCallAgent] 任务已通过 Orchestrator 提交: taskId={}", taskId);
+            log.info("✅ [AsyncCallAgent] 任务已通过 Orchestrator 提交: taskId={}", taskId);
 
-                return createSubmittedResponse(taskId, targetAgentName);
-
-            } else {
-                // Fallback: 如果 Orchestrator 不可用，使用旧逻辑
-                log.warn("⚠️ [AsyncCallAgent] Orchestrator 不可用，使用旧逻辑");
-
-                // 生成任务 ID
-                String taskId = UUID.randomUUID().toString();
-
-                // 创建任务记录
-                AsyncTaskEntity taskEntity = AsyncTaskEntity.builder()
-                    .taskId(taskId)
-                    .agentId(targetAgent.getAgentId())
-                    .agentName(targetAgentName)
-                    .conversationId(conversationId)
-                    .callerAgentId(callerAgentId)
-                    .taskDescription(task)
-                    .priority(priority)
-                    .status(AsyncTaskStatus.SUBMITTED)
-                    .submitTime(LocalDateTime.now())
-                    .build();
-
-                asyncTaskRepository.insert(taskEntity);
-
-                // 检查 Agent 是否忙碌
-                if (agentExecutionManager.isAgentBusy(targetAgent.getAgentId())) {
-                    // Agent 正忙，加入 Redis 队列
-                    String queuedTaskId = redisAgentTaskQueue.enqueue(
-                        targetAgent.getAgentId(),
-                        targetAgentName,
-                        conversationId,
-                        callerAgentId,
-                        task,
-                        priority
-                    );
-
-                    // 更新任务状态
-                    taskEntity.setStatus(AsyncTaskStatus.QUEUED);
-                    asyncTaskRepository.updateById(taskEntity);
-
-                    long queuePosition = redisAgentTaskQueue.getPosition(targetAgent.getAgentId(), queuedTaskId);
-
-                    log.info("📥 任务已加入 Redis 队列: taskId={}, agentName={}, queuePosition={}",
-                        queuedTaskId, targetAgentName, queuePosition);
-
-                    return createQueuedResponse(queuedTaskId, targetAgentName, (int) queuePosition);
-
-                } else {
-                    // Agent 空闲，立即执行
-                    log.info("▶️  任务立即执行: taskId={}, agentName={}", taskId, targetAgentName);
-
-                    // 异步执行
-                    executeAsync(taskEntity, targetAgent);
-
-                    return createSubmittedResponse(taskId, targetAgentName);
-                }
-            }
+            return createSubmittedResponse(taskId, targetAgentName);
 
         } catch (Exception e) {
             log.error("❌ async_call_agent 执行失败: error={}", e.getMessage(), e);
@@ -303,158 +238,6 @@ public class AsyncCallAgentTool {
                 taskId, e.getMessage(), e);
             return createErrorResponse("查询失败: " + e.getMessage());
         }
-    }
-
-    /**
-     * 异步执行任务
-     */
-    @Async
-    protected void executeAsync(AsyncTaskEntity taskEntity, AgentEntity targetAgent) {
-        log.info("🔄 [AsyncCallAgent] executeAsync 方法被调用: taskId={}, agentId={}, thread={}",
-            taskEntity.getTaskId(), taskEntity.getAgentId(), Thread.currentThread().getName());
-
-        CompletableFuture.runAsync(() -> {
-            log.info("🧵 [AsyncCallAgent] CompletableFuture.runAsync 开始执行: taskId={}, thread={}",
-                taskEntity.getTaskId(), Thread.currentThread().getName());
-            String taskId = taskEntity.getTaskId();
-            String agentId = taskEntity.getAgentId();
-            String conversationId = taskEntity.getConversationId();
-            String task = taskEntity.getTaskDescription();
-
-            try {
-                // 更新状态为 RUNNING
-                taskEntity.setStatus(AsyncTaskStatus.RUNNING);
-                taskEntity.setStartTime(LocalDateTime.now());
-                asyncTaskRepository.updateById(taskEntity);
-
-                log.info("▶️  [AsyncCallAgent] 任务开始执行: taskId={}, agentId={}, conversationId={}",
-                    taskId, agentId, conversationId);
-
-                // 关键：增加活跃子任务计数，防止父任务关闭 SSE 连接
-                agentExecutionManager.incrementActiveSubTasks(conversationId);
-
-                log.info("🔢 [AsyncCallAgent] 活跃子任务计数已增加: convId={}", conversationId);
-
-                // 执行 Agent
-                StringBuilder resultBuilder = new StringBuilder();
-
-                log.info("🚀 [AsyncCallAgent] 准备调用 executeTaskExtended: agentId={}, conversationId={}",
-                    agentId, conversationId);
-
-                agentExecutionManager.executeTaskExtended(
-                    new AgentExecutionManager.ExecutionContextExtended(
-                        agentId,
-                        conversationId,
-                        task,
-                        "assistant",
-                        "AsyncCallAgent",
-                        true  // ← 标记为子任务
-                    ),
-                    event -> {
-                        // 关键修复：子任务需要通过父任务的 SSE 连接发送事件
-                        // 由于 executeTaskExtended 的 isSubTask=true 不会注册 sessionStreams，
-                        // 我们需要手动获取父任务的 SSE 连接并发送事件
-
-                        log.info("📡 [AsyncCallAgent] 子任务事件: convId={}, eventType={}, senderName={}",
-                            conversationId, event.getEventType(), event.getSenderName());
-
-                        // 直接使用 AgentExecutionManager 的 broadcastSubTaskEvent 方法
-                        // 这个方法会从 sessionStreams 获取父任务的 SSE 连接
-                        agentExecutionManager.broadcastSubTaskEvent(conversationId, event);
-
-                        // 同时收集结果用于保存到数据库
-                        if (event != null) {
-                            String text = extractTextFromEvent(event);
-                            if (text != null && !text.isEmpty()) {
-                                resultBuilder.append(text);
-                            }
-                        }
-                    },
-                    () -> {
-                        // 完成
-                        String result = resultBuilder.toString();
-                        taskEntity.setResult(result);
-                        taskEntity.setStatus(AsyncTaskStatus.COMPLETED);
-                        taskEntity.setCompleteTime(LocalDateTime.now());
-                        asyncTaskRepository.updateById(taskEntity);
-
-                        log.info("✅ 任务完成: taskId={}, resultLength={}",
-                            taskId, result.length());
-
-                        // 关键：减少活跃子任务计数
-                        agentExecutionManager.decrementActiveSubTasks(conversationId);
-
-                        // 处理队列中的下一个任务
-                        redisAgentTaskQueue.processNextTask(agentId,
-                            (nextTaskId) -> {
-                                AsyncTaskEntity nextTaskEntity = asyncTaskRepository.findByTaskId(nextTaskId);
-                                if (nextTaskEntity != null) {
-                                    executeAsync(nextTaskEntity, targetAgent);
-                                }
-                            });
-                    },
-                    throwable -> {
-                        // 失败
-                        taskEntity.setStatus(AsyncTaskStatus.FAILED);
-                        taskEntity.setErrorMessage(throwable.getMessage());
-                        taskEntity.setCompleteTime(LocalDateTime.now());
-                        asyncTaskRepository.updateById(taskEntity);
-
-                        log.error("❌ 任务失败: taskId={}, error={}",
-                            taskId, throwable.getMessage(), throwable);
-
-                        // 关键：减少活跃子任务计数（即使失败也要减少）
-                        agentExecutionManager.decrementActiveSubTasks(conversationId);
-
-                        // 处理队列中的下一个任务
-                        redisAgentTaskQueue.processNextTask(agentId,
-                            (nextTaskId) -> {
-                                AsyncTaskEntity nextTaskEntity = asyncTaskRepository.findByTaskId(nextTaskId);
-                                if (nextTaskEntity != null) {
-                                    executeAsync(nextTaskEntity, targetAgent);
-                                }
-                            });
-                    }
-                );
-
-            } catch (Exception e) {
-                log.error("❌ 执行异步任务异常: taskId={}, error={}",
-                    taskId, e.getMessage(), e);
-
-                taskEntity.setStatus(AsyncTaskStatus.FAILED);
-                taskEntity.setErrorMessage(e.getMessage());
-                taskEntity.setCompleteTime(LocalDateTime.now());
-                asyncTaskRepository.updateById(taskEntity);
-
-                // 关键：减少活跃子任务计数（即使异常也要减少）
-                agentExecutionManager.decrementActiveSubTasks(conversationId);
-
-                // 处理队列中的下一个任务
-                redisAgentTaskQueue.processNextTask(agentId,
-                    (nextTaskId) -> {
-                        AsyncTaskEntity nextTaskEntity = asyncTaskRepository.findByTaskId(nextTaskId);
-                        if (nextTaskEntity != null) {
-                            executeAsync(nextTaskEntity, targetAgent);
-                        }
-                    });
-            }
-        });
-    }
-
-    /**
-     * 从事件中提取文本
-     */
-    private String extractTextFromEvent(com.deepknow.agentoz.dto.InternalCodexEvent event) {
-        // 简化版本：直接返回 rawEventJson
-        // 实际实现可以参考 CallAgentTool 的 collectText 方法
-        try {
-            String json = event.getRawEventJson();
-            if (json != null) {
-                return json; // 简化处理
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
     }
 
     /**
