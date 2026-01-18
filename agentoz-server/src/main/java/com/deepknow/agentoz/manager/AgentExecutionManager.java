@@ -287,11 +287,11 @@ public class AgentExecutionManager {
                                 return;
                             }
 
-                            // 正常完成 - 持久化 updatedRollout
+                            // 正常完成
                             if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) {
                                 agent.setActiveContextFromBytes(e.getUpdatedRollout());
                                 agentRepository.updateById(agent);
-                                log.info("✅ [onNext-FINISHED] 已持久化 updatedRollout: agentId={}, size={} bytes",
+                                log.info("✅ [FINISHED] 已持久化 updatedRollout: agentId={}, size={} bytes",
                                     agent.getAgentId(), e.getUpdatedRollout().length);
                             }
 

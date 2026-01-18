@@ -262,8 +262,8 @@ public class AsyncCallAgentTool {
     /**
      * 异步执行任务
      */
-    @Async
     protected void executeAsync(AsyncTaskEntity taskEntity, AgentEntity targetAgent) {
+        // 显式创建异步任务（不依赖 @Async）
         CompletableFuture.runAsync(() -> {
             String taskId = taskEntity.getTaskId();
             String agentId = taskEntity.getAgentId();
@@ -276,13 +276,19 @@ public class AsyncCallAgentTool {
                 taskEntity.setStartTime(LocalDateTime.now());
                 asyncTaskRepository.updateById(taskEntity);
 
-                log.info("▶️  任务开始执行: taskId={}, agentId={}", taskId, agentId);
+                log.info("▶️  [AsyncCallAgent] 任务开始执行: taskId={}, agentId={}, conversationId={}",
+                    taskId, agentId, conversationId);
 
                 // 关键：增加活跃子任务计数，防止父任务关闭 SSE 连接
                 agentExecutionManager.incrementActiveSubTasks(conversationId);
 
+                log.info("🔢 [AsyncCallAgent] 活跃子任务计数已增加: convId={}", conversationId);
+
                 // 执行 Agent
                 StringBuilder resultBuilder = new StringBuilder();
+
+                log.info("🚀 [AsyncCallAgent] 准备调用 executeTaskExtended: agentId={}, conversationId={}",
+                    agentId, conversationId);
 
                 agentExecutionManager.executeTaskExtended(
                     new AgentExecutionManager.ExecutionContextExtended(
