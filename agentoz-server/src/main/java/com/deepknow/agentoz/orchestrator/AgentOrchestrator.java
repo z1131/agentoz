@@ -12,6 +12,7 @@ import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.manager.converter.TaskResponseConverter;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.model.OrchestrationSession;
+import com.deepknow.agentoz.service.ConversationHistoryService;
 import com.deepknow.agentoz.service.RedisAgentTaskQueue;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -61,6 +62,7 @@ public class AgentOrchestrator implements AgentExecutionService {
     private final AgentTaskExecutor taskExecutor;
     private final AgentTaskBuilder taskBuilder;
     private final RedisAgentTaskQueue redisAgentTaskQueue;
+    private final ConversationHistoryService conversationHistoryService;
 
     /**
      * 会话管理器（单例，所有实例共享）
@@ -94,6 +96,9 @@ public class AgentOrchestrator implements AgentExecutionService {
         }
 
         log.info("[Orchestrator] 收到任务请求: convId={}, agentId={}", conversationId, agentId);
+
+        // 保存用户消息到历史记录
+        conversationHistoryService.appendUserMessage(conversationId, userMessage);
 
         try {
             // 创建主会话（传入 onComplete 回调）
@@ -298,6 +303,25 @@ public class AgentOrchestrator implements AgentExecutionService {
                     public void onComplete(String result) {
                         log.info("[VirtualThread] 任务完成: taskId={}, resultLength={}",
                                 taskId, result.length());
+
+                        // 保存Agent回复到历史记录
+                        try {
+                            // 从数据库查询Agent名称
+                            String agentId = context.agentId();
+                            String agentName = agentId; // 默认使用ID
+
+                            var agentEntity = agentRepository.selectOne(
+                                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentEntity>()
+                                            .eq(AgentEntity::getAgentId, agentId)
+                            );
+                            if (agentEntity != null) {
+                                agentName = agentEntity.getAgentName();
+                            }
+
+                            conversationHistoryService.appendAgentReply(session.getSessionId(), agentName, result);
+                        } catch (Exception e) {
+                            log.error("[History] 保存Agent回复失败: convId={}", session.getSessionId(), e);
+                        }
 
                         if (!isSubTask) {
                             session.setStatus(OrchestrationSession.SessionStatus.IDLE);
