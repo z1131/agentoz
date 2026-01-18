@@ -96,19 +96,17 @@ public class AgentExecutionManager {
         }
     }
 
-    public record ExecutionContext(String agentId, String conversationId, String userMessage, String role, String senderName) {}
-
-    public record ExecutionContextExtended(
-            String agentId, String conversationId, String userMessage, String role, String senderName,
+    public record ExecutionContext(
+            String agentId,
+            String conversationId,
+            String userMessage,
+            String role,
+            String senderName,
             boolean isSubTask
     ) {
-        public ExecutionContextExtended(String agentId, String conversationId, String userMessage, String role, String senderName) {
+        public ExecutionContext(String agentId, String conversationId, String userMessage, String role, String senderName) {
             this(agentId, conversationId, userMessage, role, senderName, false);
         }
-    }
-
-    public void executeTask(ExecutionContext context, Consumer<InternalCodexEvent> eventConsumer, Runnable onCompleted, Consumer<Throwable> onError) {
-        executeTaskExtended(new ExecutionContextExtended(context.agentId(), context.conversationId(), context.userMessage(), context.role(), context.senderName(), false), eventConsumer, onCompleted, onError);
     }
 
     /**
@@ -139,13 +137,13 @@ public class AgentExecutionManager {
         }
     }
 
-    public void executeTaskExtended(
-            ExecutionContextExtended context,
+    public void executeTask(
+            ExecutionContext context,
             Consumer<InternalCodexEvent> eventConsumer,
             Runnable onCompleted,
             Consumer<Throwable> onError
     ) {
-        final String curTaskId = context.isSubTask ? UUID.randomUUID().toString() : context.conversationId();
+        final String curTaskId = context.isSubTask() ? UUID.randomUUID().toString() : context.conversationId();
 
         try {
             AgentEntity agent = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, resolveAgentId(context)));
@@ -157,7 +155,7 @@ public class AgentExecutionManager {
             injectMcpHeaders(config, agent.getAgentId(), agent.getConversationId(), curTaskId);
 
             // 标记 Agent 为忙碌（仅在非子任务时）
-            if (!context.isSubTask) {
+            if (!context.isSubTask()) {
                 markAgentBusy(agent.getAgentId(), curTaskId);
             }
 
@@ -231,7 +229,7 @@ public class AgentExecutionManager {
 
                 @Override
                 public void onError(Throwable t) {
-                    if (!context.isSubTask) {
+                    if (!context.isSubTask()) {
                         // 标记 Agent 为空闲
                         markAgentFree(context.agentId());
                     }
@@ -240,7 +238,7 @@ public class AgentExecutionManager {
 
                 @Override
                 public void onCompleted() {
-                    if (!context.isSubTask) {
+                    if (!context.isSubTask()) {
                         log.info("[onCompleted] 父任务完成: convId={}",
                             context.conversationId());
                         // 标记 Agent 为空闲
@@ -279,7 +277,7 @@ public class AgentExecutionManager {
         } catch (Exception ignored) {}
     }
 
-    private String resolveAgentId(ExecutionContextExtended c) {
+    private String resolveAgentId(ExecutionContext c) {
         if (c.agentId() != null && !c.agentId().isEmpty()) return c.agentId();
         AgentEntity p = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getConversationId, c.conversationId()).eq(AgentEntity::getIsPrimary, true));
         if (p == null) throw new AgentOzException(AgentOzErrorCode.PRIMARY_AGENT_MISSING, c.conversationId());
