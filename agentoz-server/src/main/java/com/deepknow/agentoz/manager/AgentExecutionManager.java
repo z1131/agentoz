@@ -188,9 +188,14 @@ public class AgentExecutionManager {
 
                             // 正常完成
                             if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) agent.setActiveContextFromBytes(e.getUpdatedRollout());
-                            if (sb.length() > 0) agent.updateOutputState(sb.toString());
-                            agentRepository.updateById(agent);
+                            
+                            // 替换原有的 updateOutputState，使用 ContextManager 统一管理状态 (设置为 IDLE)
+                            agentContextManager.onAgentResponse(agent.getAgentId(), sb.toString());
+                        } else {
+                            // 处理过程中的事件更新 (Thinking, Call Tool...)
+                            agentContextManager.onCodexEvent(agent.getAgentId(), e);
                         }
+                        
                         eventConsumer.accept(e);
                     } catch (RuntimeException ex) {
                         if (!"A2A_INTERRUPT".equals(ex.getMessage())) {
@@ -442,7 +447,10 @@ public class AgentExecutionManager {
 
                         if (e.getStatus() == InternalCodexEvent.Status.FINISHED) {
                             if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) agent.setActiveContextFromBytes(e.getUpdatedRollout());
-                            agentRepository.updateById(agent);
+                            // 恢复任务完成，重置为 IDLE
+                            agentContextManager.onAgentResponse(agent.getAgentId(), ""); 
+                        } else {
+                            agentContextManager.onCodexEvent(agent.getAgentId(), e);
                         }
                         eventConsumer.accept(e);
                     } catch (Exception ex) {

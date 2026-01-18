@@ -268,6 +268,8 @@ public class AgentManagerServiceImpl implements AgentManagerService {
             dto.setIsPrimary(agent.getIsPrimary());
             dto.setConversationId(agent.getConversationId());
             dto.setConfigId(agent.getConfigId());
+            dto.setState(agent.getState());
+            dto.setStateDescription(agent.getStateDescription());
             return dto;
         }).collect(java.util.stream.Collectors.toList());
     }

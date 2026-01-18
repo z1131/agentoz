@@ -31,4 +31,14 @@ public class AgentDTO implements Serializable {
      * 绑定的配置ID
      */
     private String configId;
+
+    /**
+     * Agent 状态 (Idle/Running)
+     */
+    private String state;
+
+    /**
+     * 状态描述 (Thinking..., Read: xxx, etc)
+     */
+    private String stateDescription;
 }

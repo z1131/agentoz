@@ -252,56 +252,45 @@ public class AgentEntity {
             return this.activeContext != null && !this.activeContext.isEmpty();
         }
 
-            /**
-             * 更新输入状态
-             *
-             * @param inputMessage 输入消息
-             * @param role 来源角色 (user 或 AgentName)
-             */
+    /**
+     * 设置 Agent 为运行状态
+     *
+     * @param description 状态描述 (e.g., "Thinking", "Read: xxx")
+     */
+    public void setRunningState(String description) {
+        this.state = "Running";
+        this.stateDescription = description;
+        this.lastInteractionAt = LocalDateTime.now();
+    }
 
-            public void updateInputState(String inputMessage, String role) {
+    /**
+     * 设置 Agent 为空闲状态
+     */
+    public void setIdleState() {
+        this.state = "Idle";
+        this.stateDescription = "Idle"; // 或者 "Waiting"
+        this.lastInteractionAt = LocalDateTime.now();
+    }
 
-                String summary = generateSummary(inputMessage);
-                String prefix;
+    // 已弃用：旧的状态更新逻辑
+    public void updateInputState(String inputMessage, String role) {
+        setRunningState("Thinking");
+        // 保留计数更新
+        this.interactionCount = (this.interactionCount != null ? this.interactionCount : 0) + 1;
+        this.lastInteractionType = "input";
+    }
 
-                if (role == null || "user".equalsIgnoreCase(role)) {
-                    prefix = "输入: ";
-                } else {
-                    prefix = "[From " + role + "]: ";
-                }
-                if (this.stateDescription == null || this.stateDescription.isEmpty()) {
-                    this.stateDescription = prefix + summary;
-                } else {
-                    this.stateDescription = this.stateDescription + " | " + prefix + summary;
-                }
-                this.interactionCount = (this.interactionCount != null ? this.interactionCount : 0) + 1;
-                this.lastInteractionType = "input";
-                this.lastInteractionAt = LocalDateTime.now();
-            }
-        /**
-         * 更新输出状态
-         *
-         * @param responseMessage 输出消息
-         */
-        public void updateOutputState(String responseMessage) {
+    public void updateOutputState(String responseMessage) {
+        setIdleState();
+        this.interactionCount = (this.interactionCount != null ? this.interactionCount : 0) + 1;
+        this.lastInteractionType = "output";
+    }
 
-            String summary = generateSummary(responseMessage);
-            String prefix = "输出: ";
-            if (this.stateDescription == null || this.stateDescription.isEmpty()) {
-                this.stateDescription = prefix + summary;
-            } else {
-                this.stateDescription = this.stateDescription + " | " + prefix + summary;
-            }
-            this.interactionCount = (this.interactionCount != null ? this.interactionCount : 0) + 1;
-            this.lastInteractionType = "output";
-            this.lastInteractionAt = LocalDateTime.now();
-        }
-
-        private String generateSummary(String text) {
-            if (text == null) return "";
-            String summary = text.length() > 50 ? text.substring(0, 50) + "..." : text;
-            return summary.replace("\n", " ");
-        }
+    private String generateSummary(String text) {
+        if (text == null) return "";
+        String summary = text.length() > 50 ? text.substring(0, 50) + "..." : text;
+        return summary.replace("\n", " ");
+    }
 
     }
 

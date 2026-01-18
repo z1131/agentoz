@@ -1,8 +1,10 @@
 package com.deepknow.agentoz.infra.history;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.model.AgentEntity;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +39,90 @@ public class AgentContextManager {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
+     * Codex 开始执行时调用
+     */
+    public void onCodexStart(String agentId) {
+        setAgentState(agentId, "Running", "Thinking...");
+    }
+
+    /**
+     * Codex 结束执行时调用
+     */
+    public void onCodexStop(String agentId) {
+        setAgentState(agentId, "Idle", "Idle");
+    }
+
+    /**
+     * 处理 Codex 内部事件以更新状态描述
+     */
+    public void onCodexEvent(String agentId, InternalCodexEvent event) {
+        try {
+            if (event.getEventType() == null) return;
+            
+            String description = null;
+            
+            if ("agent_reasoning".equals(event.getEventType())) {
+                // 如果是思考过程，可以显示思考中，或者显示具体的思考内容片段（如果需要）
+                // 用户要求取消“人工手写”，直接用 Codex 内容。
+                // 暂时保持 Thinking... 或者提取内容前缀
+                // JsonNode n = objectMapper.readTree(event.getRawEventJson());
+                // String text = n.path("content").asText();
+                // if (!text.isEmpty()) description = "Thinking: " + trunc(text, 50);
+                description = "Thinking...";
+            } else if ("item.completed".equals(event.getEventType())) {
+                // 工具调用完成/发起
+                JsonNode n = objectMapper.readTree(event.getRawEventJson());
+                JsonNode item = n.path("item");
+                
+                // 仅关注工具调用类型
+                if ("mcp_tool_call".equals(item.path("type").asText()) || item.has("tool")) {
+                     String toolName = item.path("tool").asText("");
+                     String args = item.path("arguments").toString();
+                     
+                     String action = "Call";
+                     String lowerTool = toolName.toLowerCase();
+                     if (lowerTool.startsWith("read_") || lowerTool.startsWith("get_")) action = "Read";
+                     else if (lowerTool.startsWith("write_") || lowerTool.startsWith("update_") || lowerTool.startsWith("save_")) action = "Write";
+                     else if (lowerTool.startsWith("search_")) action = "Search";
+                     
+                     description = action + ": " + trunc(args, 60);
+                }
+            }
+            
+            if (description != null) {
+                setAgentState(agentId, "Running", description);
+            }
+            
+        } catch (Exception e) {
+            log.warn("处理Codex事件更新状态失败: agentId={}, event={}", agentId, event.getEventType(), e);
+        }
+    }
+    
+    private String trunc(String s, int max) {
+        if (s == null) return "";
+        if (s.length() <= max) return s;
+        return s.substring(0, max) + "...";
+    }
+
+    private void setAgentState(String agentId, String state, String description) {
+        try {
+            AgentEntity agent = agentRepository.selectOne(
+                new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, agentId)
+            );
+            if (agent != null) {
+                if ("Running".equals(state)) {
+                    agent.setRunningState(description);
+                } else {
+                    agent.setIdleState();
+                }
+                agentRepository.updateById(agent);
+            }
+        } catch (Exception e) {
+            log.error("更新Agent状态失败: agentId={}, state={}", agentId, state, e);
+        }
+    }
+
+    /**
      * Agent 被调用时更新状态
      *
      * <p>⚠️ 此方法仅更新状态描述，不再追加 activeContext</p>
@@ -46,32 +132,8 @@ public class AgentContextManager {
      * @param role 消息角色 (user 或 caller agent name)
      */
     public void onAgentCalled(String agentId, String inputMessage, String role) {
-        log.info("Agent被调用: agentId={}, role={}, inputLength={}",
-                agentId, role, inputMessage != null ? inputMessage.length() : 0);
-
-        try {
-            AgentEntity agent = agentRepository.selectOne(
-                    new LambdaQueryWrapper<AgentEntity>()
-                            .eq(AgentEntity::getAgentId, agentId)
-            );
-
-            if (agent == null) {
-                log.warn("Agent不存在，无法更新状态: agentId={}", agentId);
-                return;
-            }
-
-            // 仅更新状态描述（用于 UI 展示）
-            agent.updateInputState(inputMessage, role);
-
-            // 持久化
-            agentRepository.updateById(agent);
-
-            log.info("Agent被调用状态已更新: agentId={}, stateDescription={}",
-                    agentId, agent.getStateDescription());
-
-        } catch (Exception e) {
-            log.error("更新Agent被调用状态失败: agentId={}", agentId, e);
-        }
+        onCodexStart(agentId);
+        log.info("Agent被调用: agentId={}, role={}", agentId, role);
     }
 
     /**
@@ -80,30 +142,8 @@ public class AgentContextManager {
      * <p>⚠️ 此方法仅更新状态描述，activeContext 由服务层直接处理 updated_rollout</p>
      */
     public void onAgentResponse(String agentId, String responseMessage) {
-        log.info("Agent返回响应: agentId={}, responseLength={}",
-                agentId, responseMessage != null ? responseMessage.length() : 0);
-
-        try {
-            AgentEntity agent = agentRepository.selectOne(
-                    new LambdaQueryWrapper<AgentEntity>()
-                            .eq(AgentEntity::getAgentId, agentId)
-            );
-
-            if (agent == null) {
-                return;
-            }
-
-            // 仅更新状态描述（用于 UI 展示）
-            agent.updateOutputState(responseMessage);
-
-            // 持久化
-            agentRepository.updateById(agent);
-
-            log.info("Agent返回响应状态已更新: agentId={}", agentId);
-
-        } catch (Exception e) {
-            log.error("更新Agent返回响应状态失败: agentId={}", agentId, e);
-        }
+       onCodexStop(agentId);
+       log.info("Agent返回响应: agentId={}", agentId);
     }
 
     /**
@@ -112,32 +152,30 @@ public class AgentContextManager {
      * <p>⚠️ 工具调用记录由 Codex 自动管理在 activeContext 中</p>
      */
     public void onAgentCalledTool(String agentId, String callId, String toolName, String arguments) {
-        log.info("Agent调用工具: agentId={}, callId={}, tool={}", agentId, callId, toolName);
-
-        try {
-            AgentEntity agent = agentRepository.selectOne(
-                    new LambdaQueryWrapper<AgentEntity>()
-                            .eq(AgentEntity::getAgentId, agentId)
-            );
-
-            if (agent == null) {
-                return;
-            }
-
-            // 仅更新状态描述（用于 UI 展示）
-            String currentDesc = agent.getStateDescription();
-            String summary = "调用工具: " + toolName;
-            if (currentDesc == null || currentDesc.isEmpty()) {
-                agent.setStateDescription(summary);
-            } else {
-                agent.setStateDescription(currentDesc + " | " + summary);
-            }
-
-            agentRepository.updateById(agent);
-
-        } catch (Exception e) {
-            log.error("更新Agent工具调用状态失败: agentId={}", agentId, e);
+       // 该方法保留用于兼容旧逻辑，或作为备用
+       // 新逻辑倾向于使用 onCodexEvent 统一处理
+       // 这里可以转调用 setAgentState 来复用解析逻辑（如果参数更清晰，优先用参数）
+        String action = "Call";
+        String displayName = toolName.toLowerCase();
+        
+        if (displayName.startsWith("read_") || displayName.startsWith("get_")) {
+            action = "Read";
+        } else if (displayName.startsWith("write_") || displayName.startsWith("update_") || displayName.startsWith("delete_") || displayName.startsWith("create_") || displayName.startsWith("save_")) {
+            action = "Write";
+        } else if (displayName.startsWith("search_")) {
+            action = "Search";
         }
+
+        String argsSummary = arguments != null ? arguments : "";
+        if (argsSummary.length() > 50) {
+            argsSummary = argsSummary.substring(0, 50) + "...";
+        }
+
+        String description = action + ": " + argsSummary;
+        if (argsSummary.isEmpty()) {
+            description = action;
+        }
+        setAgentState(agentId, "Running", description);
     }
 
     /**
@@ -146,10 +184,8 @@ public class AgentContextManager {
      * <p>⚠️ 工具返回记录由 Codex 自动管理在 activeContext 中</p>
      */
     public void onToolReturned(String agentId, String callId, String output) {
-        log.info("工具返回结果: agentId={}, callId={}", agentId, callId);
-
-        // 工具返回通常不需要更新状态描述，仅记录日志
-        // 如需更新，可以在这里添加逻辑
+        // 工具返回通常不需要更新状态描述，或者可以更新为 "Thinking..." (工具返回后继续思考)
+         setAgentState(agentId, "Running", "Thinking...");
     }
 
     /**
