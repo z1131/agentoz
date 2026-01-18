@@ -72,6 +72,12 @@ public class AsyncTaskEntity {
     private String callerAgentId;
 
     /**
+     * 父任务 ID（用于追踪调用链）
+     */
+    @TableField("parent_task_id")
+    private String parentTaskId;
+
+    /**
      * 任务描述
      */
     @TableField("task_description")
