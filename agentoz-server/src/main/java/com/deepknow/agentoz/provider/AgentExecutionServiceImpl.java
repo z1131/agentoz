@@ -9,6 +9,8 @@ import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.manager.AgentExecutionManager;
 import com.deepknow.agentoz.manager.converter.TaskResponseConverter;
 import com.deepknow.agentoz.infra.util.StreamGuard;
+import com.deepknow.agentoz.orchestrator.AgentOrchestrator;
+import com.deepknow.agentoz.model.OrchestrationSession;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.common.stream.StreamObserver;
 import org.apache.dubbo.config.annotation.DubboService;
@@ -36,37 +38,33 @@ public class AgentExecutionServiceImpl implements AgentExecutionService {
     @Autowired
     private AgentExecutionManager agentExecutionManager;
 
+    @Autowired
+    private AgentOrchestrator orchestrator;
+
     @Override
     public void executeTask(ExecuteTaskRequest request, StreamObserver<TaskResponse> responseObserver) {
         String traceInfo = "ConvId=" + request.getConversationId();
 
         StreamGuard.run(responseObserver, () -> {
-            log.info("收到任务请求: {}, Role={}", traceInfo, request.getRole());
+            log.info("📥 [AgentExecutionService] 收到任务请求: {}, Role={}, AgentId={}",
+                traceInfo, request.getRole(), request.getAgentId());
 
-            // 1. 构建执行上下文
-            AgentExecutionManager.ExecutionContext context = new AgentExecutionManager.ExecutionContext(
-                    request.getAgentId(),
-                    request.getConversationId(),
-                    request.getMessage(),
-                    request.getRole() != null ? request.getRole() : "user",
-                    request.getSenderName()
+            // 使用 AgentOrchestrator 启动主会话
+            OrchestrationSession session = orchestrator.startMainSession(
+                request.getConversationId(),
+                request.getAgentId(),
+                request.getMessage(),
+                event -> {
+                    // 转换并发送事件
+                    TaskResponse dto = TaskResponseConverter.toTaskResponse(event);
+                    if (dto != null) {
+                        responseObserver.onNext(dto);
+                    }
+                }
             );
 
-            // 2. 调用 manager 执行任务
-            agentExecutionManager.executeTask(
-                    context,
-                    // 事件回调：转换为 API DTO 并发送
-                    (InternalCodexEvent event) -> {
-                        TaskResponse dto = TaskResponseConverter.toTaskResponse(event);
-                        if (dto != null) {
-                            responseObserver.onNext(dto);
-                        }
-                    },
-                    // 完成回调
-                    responseObserver::onCompleted,
-                    // 错误回调
-                    responseObserver::onError
-            );
+            log.info("✅ [AgentExecutionService] 主会话已启动: sessionId={}, mainTaskId={}",
+                session.getSessionId(), session.getMainTaskId());
 
         }, traceInfo);
     }
