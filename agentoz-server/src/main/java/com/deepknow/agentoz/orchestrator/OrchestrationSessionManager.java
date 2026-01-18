@@ -21,6 +21,22 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class OrchestrationSessionManager {
 
+    private static volatile OrchestrationSessionManager instance;
+
+    /**
+     * 获取单例实例
+     */
+    public static OrchestrationSessionManager getInstance() {
+        if (instance == null) {
+            synchronized (OrchestrationSessionManager.class) {
+                if (instance == null) {
+                    instance = new OrchestrationSessionManager();
+                }
+            }
+        }
+        return instance;
+    }
+
     /**
      * 会话存储：conversationId -> OrchestrationSession
      */

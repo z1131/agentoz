@@ -137,7 +137,7 @@ public class AsyncCallAgentTool {
                 return createErrorResponse("无法获取会话 ID（X-Conversation-ID）");
             }
 
-            // 查找目标 Agent
+            // 查找目标 Agent（在同一会话内）
             AgentEntity targetAgent = agentRepository.selectOne(
                 new LambdaQueryWrapper<AgentEntity>()
                     .eq(AgentEntity::getConversationId, conversationId)

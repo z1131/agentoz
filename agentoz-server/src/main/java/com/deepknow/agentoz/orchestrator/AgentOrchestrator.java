@@ -62,7 +62,10 @@ public class AgentOrchestrator implements AgentExecutionService {
     private final AgentTaskBuilder taskBuilder;
     private final RedisAgentTaskQueue redisAgentTaskQueue;
 
-    private final OrchestrationSessionManager sessionManager = new OrchestrationSessionManager();
+    /**
+     * 会话管理器（单例，所有实例共享）
+     */
+    private final OrchestrationSessionManager sessionManager = OrchestrationSessionManager.getInstance();
 
     // ========== 实现 AgentExecutionService 接口 ==========
 
