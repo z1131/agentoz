@@ -1,18 +1,25 @@
 package com.deepknow.agentoz.orchestrator;
 
+import com.deepknow.agentoz.api.dto.ExecuteTaskRequest;
+import com.deepknow.agentoz.api.dto.StreamChatRequest;
+import com.deepknow.agentoz.api.dto.StreamChatResponse;
+import com.deepknow.agentoz.api.dto.TaskResponse;
+import com.deepknow.agentoz.api.service.AgentExecutionService;
 import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.manager.AgentExecutionManager;
+import com.deepknow.agentoz.manager.converter.TaskResponseConverter;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.model.OrchestrationSession;
 import com.deepknow.agentoz.service.RedisAgentTaskQueue;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.dubbo.common.stream.StreamObserver;
+import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
@@ -29,8 +36,9 @@ import java.util.function.Consumer;
  */
 @Slf4j
 @Component
+@DubboService(protocol = "tri", timeout = 3600000)
 @RequiredArgsConstructor
-public class AgentOrchestrator {
+public class AgentOrchestrator implements AgentExecutionService {
 
     private final AgentRepository agentRepository;
     private final AgentExecutionManager agentExecutionManager;
@@ -56,7 +64,7 @@ public class AgentOrchestrator {
             String userMessage,
             Consumer<InternalCodexEvent> eventConsumer
     ) {
-        log.info("🎯 [Orchestrator] 启动主会话: convId={}, agentId={}", conversationId, mainAgentId);
+        log.info("[Orchestrator] 启动主会话: convId={}, agentId={}", conversationId, mainAgentId);
 
         // 创建会话
         OrchestrationSession session = OrchestrationSession.builder()
@@ -78,7 +86,7 @@ public class AgentOrchestrator {
                 userMessage,
                 "user",
                 "Orchestrator",
-                false  // 主任务，不是子任务
+                false  // 主任务
             ),
             event -> {
                 // 主 Agent 事件直接发送到前端
@@ -86,12 +94,12 @@ public class AgentOrchestrator {
             },
             () -> {
                 // 主 Agent 完成
-                log.info("✅ [Orchestrator] 主 Agent 完成: convId={}", conversationId);
+                log.info("[Orchestrator] 主 Agent 完成: convId={}", conversationId);
                 session.setStatus(OrchestrationSession.SessionStatus.IDLE);
             },
             error -> {
                 // 主 Agent 失败
-                log.error("❌ [Orchestrator] 主 Agent 失败: convId={}, error={}",
+                log.error("[Orchestrator] 主 Agent 失败: convId={}, error={}",
                     conversationId, error.getMessage());
                 session.setStatus(OrchestrationSession.SessionStatus.FAILED);
             }
@@ -119,7 +127,7 @@ public class AgentOrchestrator {
             String taskDescription,
             String priority
     ) {
-        log.info("📝 [Orchestrator] 提交子任务: convId={}, parent={}, target={}",
+        log.info("[Orchestrator] 提交子任务: convId={}, parent={}, target={}",
             parentConversationId, parentTaskId, targetAgentName);
 
         // 检查目标 Agent 是否存在
@@ -141,7 +149,7 @@ public class AgentOrchestrator {
         // 检查目标 Agent 是否忙碌
         if (redisAgentTaskQueue.isAgentBusy(targetAgentId)) {
             // 提交到 Redis 队列
-            log.info("⏳ [Orchestrator] Agent 忙碌，提交到队列: agent={}", targetAgentName);
+            log.info("[Orchestrator] Agent 忙碌，提交到队列: agent={}", targetAgentName);
             String taskId = redisAgentTaskQueue.enqueue(
                 targetAgentId,
                 targetAgentName,
@@ -158,7 +166,7 @@ public class AgentOrchestrator {
             return taskId;
         } else {
             // 立即执行
-            log.info("▶️️  [Orchestrator] Agent 空闲，立即执行: agent={}", targetAgentName);
+            log.info("[Orchestrator] Agent 空闲，立即执行: agent={}", targetAgentName);
             return executeSubTask(
                 session,
                 parentTaskId,
@@ -286,7 +294,50 @@ public class AgentOrchestrator {
      * 结束会话
      */
     public void endSession(String conversationId) {
-        log.info("🏁 [Orchestrator] 结束会话: convId={}", conversationId);
+        log.info("[Orchestrator] 结束会话: convId={}", conversationId);
         sessionManager.unregisterSession(conversationId);
+    }
+
+    // ========== 实现 AgentExecutionService 接口 ==========
+
+    @Override
+    public void executeTask(ExecuteTaskRequest request, StreamObserver<TaskResponse> responseObserver) {
+        String traceInfo = "ConvId=" + request.getConversationId();
+
+        try {
+            log.info("[AgentOrchestrator-API] 收到任务请求: {}, Role={}, AgentId={}",
+                traceInfo, request.getRole(), request.getAgentId());
+
+            // 使用 startMainSession 启动主会话
+            OrchestrationSession session = startMainSession(
+                request.getConversationId(),
+                request.getAgentId(),
+                request.getMessage(),
+                event -> {
+                    // 转换并发送事件
+                    TaskResponse dto = TaskResponseConverter.toTaskResponse(event);
+                    if (dto != null) {
+                        responseObserver.onNext(dto);
+                    }
+                }
+            );
+
+            log.info("[AgentOrchestrator-API] 主会话已启动: sessionId={}, mainTaskId={}",
+                session.getSessionId(), session.getMainTaskId());
+
+        } catch (Exception e) {
+            log.error("[AgentOrchestrator-API] 任务执行失败: {}", e.getMessage(), e);
+            responseObserver.onError(e);
+        }
+    }
+
+    @Override
+    public StreamObserver<StreamChatRequest> streamInputExecuteTask(StreamObserver<StreamChatResponse> responseObserver) {
+        // TODO: 实现双向流式调用
+        return new StreamObserver<>() {
+            @Override public void onNext(StreamChatRequest value) {}
+            @Override public void onError(Throwable t) { responseObserver.onError(t); }
+            @Override public void onCompleted() { responseObserver.onCompleted(); }
+        };
     }
 }

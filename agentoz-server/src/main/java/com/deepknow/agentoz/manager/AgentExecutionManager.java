@@ -12,13 +12,11 @@ import com.deepknow.agentoz.infra.repo.AgentConfigRepository;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
 import com.deepknow.agentoz.infra.repo.ConversationRepository;
 import com.deepknow.agentoz.infra.util.JwtUtils;
-import com.deepknow.agentoz.infra.config.A2AConfig;
 import com.deepknow.agentoz.model.AgentConfigEntity;
 import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.model.ConversationEntity;
 import codex.agent.RunTaskRequest;
 import codex.agent.SessionConfig;
-import io.a2a.server.tasks.TaskStore;
 import io.a2a.spec.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,7 +50,6 @@ public class AgentExecutionManager {
     private final CodexAgentClient codexAgentClient;
     private final AgentContextManager agentContextManager;
     private final JwtUtils jwtUtils;
-    private final TaskStore taskStore;
 
     private final String websiteUrl = "https://agentoz.deepknow.online";
     private final ObjectMapper objectMapper = new ObjectMapper()
@@ -170,15 +167,10 @@ public class AgentExecutionManager {
                     .setHistoryRollout(ByteString.copyFrom(agent.getActiveContextBytes())).build();
 
             final StringBuilder sb = new StringBuilder();
-            // 保存 StreamObserver 引用，用于 A2A 中断时关闭
-            final StreamObserver<codex.agent.RunTaskResponse>[] streamRef = new StreamObserver[]{null};
+            // 执行 Codex 调用
             codexAgentClient.runTask(agent.getConversationId(), req, new StreamObserver<codex.agent.RunTaskResponse>() {
-                private Task subTaskCandidate = null;
-                private boolean isInterrupted = false;
-
                 @Override
                 public void onNext(codex.agent.RunTaskResponse p) {
-                    if (isInterrupted) return;
                     try {
                         InternalCodexEvent e = InternalCodexEventConverter.toInternalEvent(p);
                         if (e == null) return;
@@ -187,45 +179,9 @@ public class AgentExecutionManager {
                         persist(context.conversationId(), agent.getAgentId(), agent.getAgentName(), e);
                         collectTextRobustly(e, sb);
 
-                        if ("item.completed".equals(e.getEventType()) && e.getRawEventJson() != null) {
-                            JsonNode toolRes = objectMapper.readTree(e.getRawEventJson()).path("item").path("result");
-                            for (JsonNode contentItem : toolRes.path("content")) {
-                                String text = contentItem.path("text").asText("");
-                                if (text.contains("\"id\"") && text.contains("\"status\"")) {
-                                    try {
-                                        Task t = objectMapper.readValue(text, Task.class);
-                                        if (t.getId() != null && (t.getStatus().state() == TaskState.SUBMITTED || t.getStatus().state() == TaskState.WORKING)) {
-                                            subTaskCandidate = t;
-                                            isInterrupted = true;
-                                            // 关闭 StreamObserver，触发 Codex EOF
-                                            if (streamRef[0] != null) {
-                                                log.info("[A2A] 关闭 StreamObserver 触发 Codex 中断: conversationId={}", context.conversationId());
-                                                streamRef[0].onCompleted();
-                                            }
-                                            suspendAndRegister(t.getId(), agent, config, eventConsumer);
-                                            throw new RuntimeException("A2A_INTERRUPT");
-                                        }
-                                    } catch (Exception ignored) {}
-                                }
-                            }
-                        }
-
                         if (e.getStatus() == InternalCodexEvent.Status.FINISHED) {
-                            // 检查是否是中间状态（updated_rollout_interrupt）
-                            if (e.isIntermediateRollout()) {
-                                log.info("[A2A] 收到中间状态，持久化但不关闭流: conversationId={}", context.conversationId());
-                                if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) {
-                                    agent.setActiveContextFromBytes(e.getUpdatedRollout());
-                                    agentRepository.updateById(agent);
-                                    log.info("[A2A] 中间状态已持久化: agentId={}, size={} bytes", agent.getAgentId(), e.getUpdatedRollout().length);
-                                }
-                                // 不调用 eventConsumer.accept(e)，因为流会保持打开
-                                // 等待子任务完成后恢复
-                                return;
-                            }
-
                             // 正常完成
-                            log.info("🔍 [onNext-FINISHED] 检查 updatedRollout: hasRollout={}, size={}",
+                            log.info("[onNext-FINISHED] 检查 updatedRollout: hasRollout={}, size={}",
                                 e.getUpdatedRollout() != null,
                                 e.getUpdatedRollout() != null ? e.getUpdatedRollout().length : 0);
 
@@ -235,13 +191,13 @@ public class AgentExecutionManager {
                                 // 关键：立即保存到数据库，防止被后续操作覆盖
                                 int updateResult = agentRepository.updateById(agent);
 
-                                log.info("✅ [FINISHED] 已持久化 updatedRollout: agentId={}, size={} bytes, updateResult={}",
+                                log.info("[FINISHED] 已持久化 updatedRollout: agentId={}, size={} bytes, updateResult={}",
                                     agent.getAgentId(), e.getUpdatedRollout().length, updateResult);
 
                                 // ⚠️ 跳过验证，因为后续的 setAgentState 可能会再次更新 Agent
                                 // 验证逻辑移到最后，在所有状态更新完成后进行
                             } else {
-                                log.warn("⚠️  [FINISHED] updatedRollout 为空！agentId={}, eventType={}",
+                                log.warn("[FINISHED] updatedRollout 为空！agentId={}, eventType={}",
                                     agent.getAgentId(), e.getEventType());
                             }
 
@@ -254,13 +210,13 @@ public class AgentExecutionManager {
                                 Thread.sleep(50); // 等待可能的并发操作完成
                                 AgentEntity finalAgent = agentRepository.selectById(agent.getAgentId());
                                 if (finalAgent != null && finalAgent.hasActiveContext()) {
-                                    log.info("✅ [FINISHED-最终验证] activeContext 保存成功: agentId={}, length={}",
+                                    log.info("[FINISHED-最终验证] activeContext 保存成功: agentId={}, length={}",
                                         agent.getAgentId(), finalAgent.getActiveContext().length());
                                 } else {
-                                    log.error("❌ [FINISHED-最终验证] activeContext 丢失! agentId={}", agent.getAgentId());
+                                    log.error("[FINISHED-最终验证] activeContext 丢失! agentId={}", agent.getAgentId());
                                 }
                             } catch (Exception ex) {
-                                log.warn("⚠️ [FINISHED] 最终验证失败: agentId={}, error={}", agent.getAgentId(), ex.getMessage());
+                                log.warn("[FINISHED] 最终验证失败: agentId={}, error={}", agent.getAgentId(), ex.getMessage());
                             }
                         } else {
                             // 处理过程中的事件更新 (Thinking, Call Tool...)
@@ -268,10 +224,6 @@ public class AgentExecutionManager {
                         }
                         
                         eventConsumer.accept(e);
-                    } catch (RuntimeException ex) {
-                        if (!"A2A_INTERRUPT".equals(ex.getMessage())) {
-                            log.error("Next fail", ex);
-                        }
                     } catch (Exception ex) {
                         log.error("Next fail", ex);
                     }
@@ -279,35 +231,22 @@ public class AgentExecutionManager {
 
                 @Override
                 public void onError(Throwable t) {
-                    if (!isInterrupted) {
-                        if (!context.isSubTask) {
-                            // 标记 Agent 为空闲
-                            markAgentFree(context.agentId());
-                            onError.accept(t);
-                        }
-                    } else {
-                        log.info("[A2A] StreamObserver 错误 (预期行为): conversationId={}", context.conversationId());
+                    if (!context.isSubTask) {
+                        // 标记 Agent 为空闲
+                        markAgentFree(context.agentId());
                     }
+                    onError.accept(t);
                 }
 
                 @Override
                 public void onCompleted() {
-                    if (!isInterrupted) {
-                        // 只在非子任务时处理
-                        if (!context.isSubTask) {
-                            log.info("✅ [onCompleted] 父任务完成: convId={}",
-                                context.conversationId());
-                            // 标记 Agent 为空闲
-                            markAgentFree(context.agentId());
-                            onCompleted.run();
-                        }
-                    } else {
-                        log.info("[A2A] StreamObserver 完成 (预期行为): conversationId={}", context.conversationId());
+                    if (!context.isSubTask) {
+                        log.info("[onCompleted] 父任务完成: convId={}",
+                            context.conversationId());
+                        // 标记 Agent 为空闲
+                        markAgentFree(context.agentId());
+                        onCompleted.run();
                     }
-                }
-
-                {
-                    streamRef[0] = this;
                 }
             });
         } catch (Exception e) { log.error("Execution error", e); onError.accept(e); }
@@ -466,105 +405,12 @@ public class AgentExecutionManager {
         ObjectNode item = objectMapper.createObjectNode();
         item.set("item", content);
         item.put("type", "agent_message");
-        item.put("agentId", "");
-        item.put("agentName", senderName);
-
-        appendHistoryItem(cid, item);
     }
-
-    private String trunc(String t, int m) { if (t == null) return null; return t.length() <= m ? t : t.substring(0, m) + "..."; }
-
     /**
-     * A2A 挂起：注册终端监听器并等待子任务完成
+     * 截断字符串到指定长度
      */
-    private void suspendAndRegister(String taskId, AgentEntity agent, AgentConfigEntity config, Consumer<InternalCodexEvent> eventConsumer) {
-        if (taskStore instanceof A2AConfig.A2AObservableStore store) {
-            store.addTerminalListener(taskId, (finished) -> {
-                String result = extractResult(finished);
-                log.info("[A2A] 委派任务完成，恢复 Agent: conversationId={}, taskId={}", agent.getConversationId(), taskId);
-
-                // 发送结果事件
-                InternalCodexEvent resultEvent = createResultEvent(result, agent.getConversationId(), agent.getAgentId());
-                eventConsumer.accept(resultEvent);
-
-                // 恢复 Agent A 的执行
-                resumeAgentAfterA2A(result, agent, config, eventConsumer);
-            });
-        }
-    }
-
-    /**
-     * A2A 恢复：子任务完成后，重新调用 Codex 继续执行
-     */
-    private void resumeAgentAfterA2A(String result, AgentEntity agent, AgentConfigEntity config, Consumer<InternalCodexEvent> eventConsumer) {
-        try {
-            // 构建恢复提示
-            String resumePrompt = String.format(
-                    "委派任务执行完毕，结果如下：\n%s\n\n请继续之前的任务。",
-                    result
-            );
-
-            log.info("[A2A] 恢复 Agent 执行: agentId={}, conversationId={}", agent.getAgentId(), agent.getConversationId());
-
-            // 重新调用 Codex，使用最新的 activeContext
-            RunTaskRequest req = RunTaskRequest.newBuilder()
-                    .setRequestId(UUID.randomUUID().toString())
-                    .setSessionId(agent.getConversationId())
-                    .setPrompt(resumePrompt)
-                    .setSessionConfig(ConfigProtoConverter.toSessionConfig(config))
-                    .setHistoryRollout(ByteString.copyFrom(agent.getActiveContextBytes()))
-                    .build();
-
-            codexAgentClient.runTask(agent.getConversationId(), req, new StreamObserver<codex.agent.RunTaskResponse>() {
-                @Override
-                public void onNext(codex.agent.RunTaskResponse p) {
-                    try {
-                        InternalCodexEvent e = InternalCodexEventConverter.toInternalEvent(p);
-                        if (e == null) return;
-                        e.setSenderName(agent.getAgentName());
-                        e.setAgentId(agent.getAgentId());
-                        persist(agent.getConversationId(), agent.getAgentId(), agent.getAgentName(), e);
-
-                        if (e.getStatus() == InternalCodexEvent.Status.FINISHED) {
-                            if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) agent.setActiveContextFromBytes(e.getUpdatedRollout());
-                            // 恢复任务完成，重置为 IDLE
-                            agentContextManager.onAgentResponse(agent.getAgentId(), ""); 
-                        } else {
-                            agentContextManager.onCodexEvent(agent.getAgentId(), e);
-                        }
-                        eventConsumer.accept(e);
-                    } catch (Exception ex) {
-                        log.error("[A2A Resume] Next fail", ex);
-                        eventConsumer.accept(InternalCodexEvent.error("恢复失败: " + ex.getMessage()));
-                    }
-                }
-
-                @Override
-                public void onError(Throwable t) {
-                    log.error("[A2A Resume] 任务失败: agentId={}", agent.getAgentId(), t);
-                    eventConsumer.accept(InternalCodexEvent.error("恢复失败: " + t.getMessage()));
-                }
-
-                @Override
-                public void onCompleted() {
-                    log.info("[A2A Resume] 任务恢复完成: agentId={}", agent.getAgentId());
-                }
-            });
-
-        } catch (Exception e) {
-            log.error("[A2A] 恢复 Agent 失败: agentId={}", agent.getAgentId(), e);
-            eventConsumer.accept(InternalCodexEvent.error("恢复失败: " + e.getMessage()));
-        }
-    }
-
-    private InternalCodexEvent createResultEvent(String result, String conversationId, String agentId) {
-        String escapedResult = result.replace("\"", "\\\"").replace("\n", "\\n");
-        String rawJson = String.format(
-            "{\"type\":\"a2a_delegation_completed\",\"conversationId\":\"%s\",\"content\":{\"text\":\"%s\"}}",
-            conversationId, escapedResult
-        );
-        return InternalCodexEvent.processing("a2a_delegation_completed", rawJson)
-                .setSenderName("System(A2A)")
-                .setAgentId(agentId);
+    private String trunc(String str, int maxLen) {
+        if (str == null) return null;
+        return str.length() > maxLen ? str.substring(0, maxLen) : str;
     }
 }
