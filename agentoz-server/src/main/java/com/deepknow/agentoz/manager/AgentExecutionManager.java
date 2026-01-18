@@ -294,11 +294,24 @@ public class AgentExecutionManager {
 
                             if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) {
                                 agent.setActiveContextFromBytes(e.getUpdatedRollout());
-                                agentRepository.updateById(agent);
-                                log.info("✅ [FINISHED] 已持久化 updatedRollout: agentId={}, size={} bytes",
-                                    agent.getAgentId(), e.getUpdatedRollout().length);
+
+                                // 关键：立即保存到数据库，防止被后续操作覆盖
+                                int updateResult = agentRepository.updateById(agent);
+
+                                log.info("✅ [FINISHED] 已持久化 updatedRollout: agentId={}, size={} bytes, updateResult={}",
+                                    agent.getAgentId(), e.getUpdatedRollout().length, updateResult);
+
+                                // 验证保存是否成功
+                                AgentEntity savedAgent = agentRepository.selectById(agent.getAgentId());
+                                if (savedAgent != null && savedAgent.hasActiveContext()) {
+                                    log.info("✅ [FINISHED] 验证成功: activeContext 长度={}",
+                                        savedAgent.getActiveContext().length());
+                                } else {
+                                    log.error("❌ [FINISHED] 验证失败: activeContext 为空!");
+                                }
                             } else {
-                                log.warn("⚠️  [FINISHED] updatedRollout 为空！agentId={}", agent.getAgentId());
+                                log.warn("⚠️  [FINISHED] updatedRollout 为空！agentId={}, eventType={}",
+                                    agent.getAgentId(), e.getEventType());
                             }
 
                             // 替换原有的 updateOutputState，使用 ContextManager 统一管理状态 (设置为 IDLE)
