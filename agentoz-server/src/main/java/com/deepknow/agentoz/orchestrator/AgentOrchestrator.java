@@ -96,7 +96,7 @@ public class AgentOrchestrator implements AgentExecutionService {
         log.info("[Orchestrator] 收到任务请求: convId={}, agentId={}", conversationId, agentId);
 
         try {
-            // 创建主会话
+            // 创建主会话（传入 onComplete 回调）
             OrchestrationSession session = startMainSession(
                     conversationId,
                     agentId,
@@ -106,6 +106,11 @@ public class AgentOrchestrator implements AgentExecutionService {
                         if (dto != null) {
                             responseObserver.onNext(dto);
                         }
+                    },
+                    () -> {
+                        // 任务完成时关闭流
+                        log.info("[Orchestrator] 流式传输结束: convId={}", conversationId);
+                        responseObserver.onCompleted();
                     }
             );
 
@@ -137,7 +142,8 @@ public class AgentOrchestrator implements AgentExecutionService {
             String conversationId,
             String agentId,
             String userMessage,
-            Consumer<InternalCodexEvent> eventConsumer
+            Consumer<InternalCodexEvent> eventConsumer,
+            Runnable onComplete
     ) {
         log.info("[Orchestrator] 启动主会话: convId={}, agentId={}", conversationId, agentId);
 
@@ -153,7 +159,7 @@ public class AgentOrchestrator implements AgentExecutionService {
         sessionManager.registerSession(session);
 
         // 2. 使用 Virtual Thread 执行主任务
-        executeTaskAsync(session, agentId, userMessage, session.getMainTaskId(), false);
+        executeTaskAsync(session, agentId, userMessage, session.getMainTaskId(), false, onComplete);
 
         return session;
     }
@@ -217,7 +223,7 @@ public class AgentOrchestrator implements AgentExecutionService {
         redisAgentTaskQueue.markAgentBusy(agentId, taskId);
 
         // 3. 使用 Virtual Thread 执行
-        executeTaskAsync(session, agentId, taskDescription, taskId, true);
+        executeTaskAsync(session, agentId, taskDescription, taskId, true, null);
 
         return taskId;
     }
@@ -263,7 +269,8 @@ public class AgentOrchestrator implements AgentExecutionService {
             String agentId,
             String userMessage,
             String taskId,
-            boolean isSubTask
+            boolean isSubTask,
+            Runnable onComplete
     ) {
         // 使用 Virtual Thread 执行任务
         Thread.startVirtualThread(() -> {
@@ -294,6 +301,16 @@ public class AgentOrchestrator implements AgentExecutionService {
 
                         if (!isSubTask) {
                             session.setStatus(OrchestrationSession.SessionStatus.IDLE);
+                            // 主任务完成时，检查是否还有活跃的子任务
+                            if (session.getActiveTaskCount() == 0) {
+                                // 所有任务都完成，关闭流
+                                log.info("[Orchestrator] 所有任务完成，关闭流: convId={}", session.getSessionId());
+                                if (onComplete != null) {
+                                    onComplete.run();
+                                }
+                            } else {
+                                log.info("[Orchestrator] 主任务完成，但还有 {} 个子任务活跃，保持连接", session.getActiveTaskCount());
+                            }
                         } else {
                             // 处理队列中的下一个任务
                             redisAgentTaskQueue.processNextTask(agentId,
@@ -301,6 +318,14 @@ public class AgentOrchestrator implements AgentExecutionService {
 
                             session.completeSubTask(taskId);
                             redisAgentTaskQueue.markAgentFree(agentId);
+
+                            // 子任务完成后，检查是否所有任务都完成
+                            if (session.getActiveTaskCount() == 0) {
+                                log.info("[Orchestrator] 所有子任务完成，关闭流: convId={}", session.getSessionId());
+                                if (onComplete != null) {
+                                    onComplete.run();
+                                }
+                            }
                         }
                     }
 
@@ -315,12 +340,24 @@ public class AgentOrchestrator implements AgentExecutionService {
                             redisAgentTaskQueue.markAgentFree(agentId);
                             session.completeSubTask(taskId);
                         }
+
+                        // 任务失败时，检查是否所有任务都完成
+                        if (session.getActiveTaskCount() == 0) {
+                            log.info("[Orchestrator] 所有任务结束（含失败），关闭流: convId={}", session.getSessionId());
+                            if (onComplete != null) {
+                                onComplete.run();
+                            }
+                        }
                     }
                 });
 
             } catch (Exception e) {
                 log.error("[VirtualThread] 任务异常: taskId={}, error={}",
                         taskId, e.getMessage(), e);
+                // 异常情况下，检查是否所有任务都完成
+                if (session.getActiveTaskCount() == 0 && onComplete != null) {
+                    onComplete.run();
+                }
             }
         });
     }
