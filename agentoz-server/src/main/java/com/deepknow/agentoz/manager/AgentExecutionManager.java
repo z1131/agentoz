@@ -288,11 +288,17 @@ public class AgentExecutionManager {
                             }
 
                             // 正常完成
+                            log.info("🔍 [onNext-FINISHED] 检查 updatedRollout: hasRollout={}, size={}",
+                                e.getUpdatedRollout() != null,
+                                e.getUpdatedRollout() != null ? e.getUpdatedRollout().length : 0);
+
                             if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) {
                                 agent.setActiveContextFromBytes(e.getUpdatedRollout());
                                 agentRepository.updateById(agent);
                                 log.info("✅ [FINISHED] 已持久化 updatedRollout: agentId={}, size={} bytes",
                                     agent.getAgentId(), e.getUpdatedRollout().length);
+                            } else {
+                                log.warn("⚠️  [FINISHED] updatedRollout 为空！agentId={}", agent.getAgentId());
                             }
 
                             // 替换原有的 updateOutputState，使用 ContextManager 统一管理状态 (设置为 IDLE)

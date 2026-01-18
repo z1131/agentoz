@@ -262,8 +262,8 @@ public class AsyncCallAgentTool {
     /**
      * 异步执行任务
      */
+    @Async
     protected void executeAsync(AsyncTaskEntity taskEntity, AgentEntity targetAgent) {
-        // 显式创建异步任务（不依赖 @Async）
         CompletableFuture.runAsync(() -> {
             String taskId = taskEntity.getTaskId();
             String agentId = taskEntity.getAgentId();
