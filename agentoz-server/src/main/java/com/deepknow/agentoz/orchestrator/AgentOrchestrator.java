@@ -4,6 +4,7 @@ import com.deepknow.agentoz.api.dto.ExecuteTaskRequest;
 import com.deepknow.agentoz.api.dto.StreamChatRequest;
 import com.deepknow.agentoz.api.dto.StreamChatResponse;
 import com.deepknow.agentoz.api.dto.TaskResponse;
+import com.deepknow.agentoz.api.dto.SessionInfo;
 import com.deepknow.agentoz.api.service.AgentExecutionService;
 import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.executor.AgentTaskExecutor;
@@ -168,6 +169,34 @@ public class AgentOrchestrator implements AgentExecutionService {
                 conversationId, session.getActiveTaskCount());
     }
 
+    @Override
+    public SessionInfo getSessionInfo(String conversationId) {
+        com.deepknow.agentoz.model.OrchestrationSession session = sessionManager.getSession(conversationId);
+        if (session == null) {
+            return null;
+        }
+
+        SessionInfo info = new SessionInfo();
+        info.setConversationId(session.getSessionId());
+        info.setStatus(session.getStatus().name());
+        info.setSubscriberCount(session.getSubscriberCount());
+        info.setCreatedAt(
+            session.getCreatedAt() != null ?
+                session.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() :
+                System.currentTimeMillis()
+        );
+        info.setUpdatedAt(
+            session.getUpdatedAt() != null ?
+                session.getUpdatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() :
+                System.currentTimeMillis()
+        );
+        info.setMainTaskId(session.getMainTaskId());
+        info.setCurrentAgentId(session.getCurrentAgentId());
+        info.setActiveTaskCount(session.getActiveTaskCount());
+
+        return info;
+    }
+
     // ========== 主会话管理 ==========
 
     /**
@@ -188,12 +217,16 @@ public class AgentOrchestrator implements AgentExecutionService {
                 .mainTaskId("main-" + conversationId)
                 .currentAgentId(agentId)
                 .status(OrchestrationSession.SessionStatus.ACTIVE)
-                .eventConsumer(eventConsumer)
+                .eventConsumer(eventConsumer) // 保留旧字段兼容性
                 .build();
 
+        // 2. 将 eventConsumer 也添加为订阅者
+        session.subscribe(eventConsumer);
+
+        // 3. 注册会话
         sessionManager.registerSession(session);
 
-        // 2. 使用 Virtual Thread 执行主任务
+        // 4. 使用 Virtual Thread 执行主任务
         executeTaskAsync(session, agentId, userMessage, session.getMainTaskId(), false, onComplete);
 
         return session;

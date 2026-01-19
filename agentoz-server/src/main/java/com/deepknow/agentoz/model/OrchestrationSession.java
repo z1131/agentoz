@@ -89,19 +89,16 @@ public class OrchestrationSession {
     private volatile boolean cancelled = false;
 
     /**
-     * SSE 连接断开标志：前端断开连接
-     */
-    private volatile boolean sseDisconnected = false;
-
-    /**
      * 打断原因
      */
     private String cancelReason;
 
     /**
-     * 最后事件发送时间（用于检测 SSE 是否存活）
+     * 事件订阅者列表（支持多个 SSE 连接同时订阅）
      */
-    private volatile long lastEventSendTime = System.currentTimeMillis();
+    @Builder.Default
+    private java.util.List<Consumer<com.deepknow.agentoz.dto.InternalCodexEvent>> subscribers =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
 
     /**
      * 会话状态枚举
@@ -111,7 +108,7 @@ public class OrchestrationSession {
         IDLE,        // 空闲：等待输入
         COMPLETED,   // 完成：任务全部完成
         FAILED,      // 失败：执行出错
-        CANCELLED    // 已取消：用户主动取消或 SSE 断开
+        CANCELLED    // 已取消：用户主动取消
     }
 
     // ========== 业务方法 ==========
@@ -141,14 +138,25 @@ public class OrchestrationSession {
     }
 
     /**
-     * 发送事件到 SSE 连接
+     * 发送事件到所有订阅者
      */
     public void sendEvent(com.deepknow.agentoz.dto.InternalCodexEvent event) {
+        // 发送给所有订阅者
+        subscribers.forEach(subscriber -> {
+            try {
+                subscriber.accept(event);
+            } catch (Exception e) {
+                // 订阅者断开，自动移除
+                subscribers.remove(subscriber);
+            }
+        });
+
+        // 兼容旧的 eventConsumer（如果存在）
         if (eventConsumer != null) {
             try {
                 eventConsumer.accept(event);
             } catch (Exception e) {
-                // 日志在调用处处理
+                // 忽略异常
             }
         }
     }
@@ -207,23 +215,13 @@ public class OrchestrationSession {
         this.cancelReason = reason;
         this.status = SessionStatus.CANCELLED;
         updatedAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
     }
 
     /**
-     * 标记 SSE 连接断开
-     */
-    public void markSseDisconnected() {
-        this.sseDisconnected = true;
-        this.status = SessionStatus.CANCELLED;
-        updatedAt = LocalDateTime.now();
-    }
-
-    /**
-     * 检查是否应该停止任务（取消或 SSE 断开）
+     * 检查是否应该停止任务（仅检查用户主动取消）
      */
     public boolean shouldStop() {
-        return cancelled || sseDisconnected;
+        return cancelled;
     }
 
     /**
@@ -234,41 +232,40 @@ public class OrchestrationSession {
     }
 
     /**
-     * 检查 SSE 是否断开
-     */
-    public boolean isSseDisconnected() {
-        return sseDisconnected;
-    }
-
-    /**
      * 获取取消原因
      */
     public String getCancelReason() {
         return cancelReason;
     }
 
+    // ========== 订阅者管理 ==========
+
     /**
-     * 发送事件到 SSE 连接（带断开检测）
+     * 订阅事件流
+     *
+     * @param subscriber 事件消费者
      */
-    public void sendEvent(com.deepknow.agentoz.dto.InternalCodexEvent event) {
-        if (eventConsumer != null) {
-            try {
-                eventConsumer.accept(event);
-                lastEventSendTime = System.currentTimeMillis();
-            } catch (Exception e) {
-                // SSE 连接已断开
-                this.sseDisconnected = true;
-                this.status = SessionStatus.CANCELLED;
-                // 日志在调用处处理，避免重复
-            }
-        }
+    public void subscribe(Consumer<com.deepknow.agentoz.dto.InternalCodexEvent> subscriber) {
+        subscribers.add(subscriber);
+        log.info("📡 [OrchestrationSession] 新订阅者: sessionId={}, subscribers={}",
+                sessionId, subscribers.size());
     }
 
     /**
-     * 检查 SSE 是否超时（超过 30 秒没有发送事件）
+     * 取消订阅
+     *
+     * @param subscriber 事件消费者
      */
-    public boolean isSseTimedOut() {
-        long now = System.currentTimeMillis();
-        return (now - lastEventSendTime) > 30000; // 30 秒超时
+    public void unsubscribe(Consumer<com.deepknow.agentoz.dto.InternalCodexEvent> subscriber) {
+        subscribers.remove(subscriber);
+        log.info("🔌 [OrchestrationSession] 取消订阅: sessionId={}, subscribers={}",
+                sessionId, subscribers.size());
+    }
+
+    /**
+     * 获取当前订阅者数量
+     */
+    public int getSubscriberCount() {
+        return subscribers.size();
     }
 }

@@ -4,6 +4,7 @@ import com.deepknow.agentoz.api.dto.ExecuteTaskRequest;
 import com.deepknow.agentoz.api.dto.StreamChatRequest;
 import com.deepknow.agentoz.api.dto.StreamChatResponse;
 import com.deepknow.agentoz.api.dto.TaskResponse;
+import com.deepknow.agentoz.api.dto.SessionInfo;
 import org.apache.dubbo.common.stream.StreamObserver;
 
 /**
@@ -78,4 +79,18 @@ public interface AgentExecutionService {
      * @param conversationId 会话 ID
      */
     void cancelTask(String conversationId);
+
+    /**
+     * 获取会话状态信息（用于断线重连）
+     *
+     * <h3>🎯 使用场景</h3>
+     * <ul>
+     *   <li>前端断线重连时检查会话是否还存在</li>
+     *   <li>查询会话的当前状态和订阅者数量</li>
+     * </ul>
+     *
+     * @param conversationId 会话 ID
+     * @return 会话状态信息，如果会话不存在返回 null
+     */
+    SessionInfo getSessionInfo(String conversationId);
 }
