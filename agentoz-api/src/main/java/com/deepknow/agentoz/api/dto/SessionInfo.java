@@ -2,6 +2,8 @@ package com.deepknow.agentoz.api.dto;
 
 import lombok.Data;
 
+import java.io.Serializable;
+
 /**
  * 会话状态信息 DTO
  *
@@ -11,7 +13,7 @@ import lombok.Data;
  * @since 2026-01-19
  */
 @Data
-public class SessionInfo {
+public class SessionInfo implements Serializable {
 
     /**
      * 会话 ID (conversationId)
