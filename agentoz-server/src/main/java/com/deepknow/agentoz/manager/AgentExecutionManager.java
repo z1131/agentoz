@@ -44,69 +44,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class AgentExecutionManager {
 
     private final AgentRepository agentRepository;
-    private final AgentConfigRepository agentConfigRepository;
-    private final ConversationRepository conversationRepository;
-    private final CodexAgentClient codexAgentClient;
-    private final AgentContextManager agentContextManager;
-    private final JwtUtils jwtUtils;
 
-    private final String websiteUrl = "https://agentoz.deepknow.online";
+    private final ConversationRepository conversationRepository;
+
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
-
-    @Autowired(required = false)
-    private com.deepknow.agentoz.service.RedisAgentTaskQueue redisAgentTaskQueue;
-
-    /**
-     * 检查 Agent 是否正在执行任务
-     *
-     * @param agentId Agent ID
-     * @return true 如果 Agent 正在执行任务，false 如果空闲
-     */
-    public boolean isAgentBusy(String agentId) {
-        // 优先使用 Redis（如果可用）
-        if (redisAgentTaskQueue != null) {
-            return redisAgentTaskQueue.isAgentBusy(agentId);
-        }
-        // 否则返回 false（降级处理，允许多任务并发）
-        return false;
-    }
-
-    /**
-     * 标记 Agent 开始执行任务
-     *
-     * @param agentId Agent ID
-     * @param taskId 任务 ID
-     */
-    public void markAgentBusy(String agentId, String taskId) {
-        if (redisAgentTaskQueue != null) {
-            redisAgentTaskQueue.markAgentBusy(agentId, taskId);
-        }
-    }
-
-    /**
-     * 标记 Agent 完成任务（空闲）
-     *
-     * @param agentId Agent ID
-     */
-    public void markAgentFree(String agentId) {
-        if (redisAgentTaskQueue != null) {
-            redisAgentTaskQueue.markAgentFree(agentId);
-        }
-    }
-
-    public record ExecutionContext(
-            String agentId,
-            String conversationId,
-            String userMessage,
-            String role,
-            String senderName,
-            boolean isSubTask
-    ) {
-        public ExecutionContext(String agentId, String conversationId, String userMessage, String role, String senderName) {
-            this(agentId, conversationId, userMessage, role, senderName, false);
-        }
-    }
+    
 
     /**
      * 持久化 Codex 事件到会话历史
@@ -136,163 +79,6 @@ public class AgentExecutionManager {
         }
     }
 
-    public void executeTask(
-            ExecutionContext context,
-            Consumer<InternalCodexEvent> eventConsumer,
-            Runnable onCompleted,
-            Consumer<Throwable> onError
-    ) {
-        final String curTaskId = context.isSubTask() ? UUID.randomUUID().toString() : context.conversationId();
-
-        try {
-            AgentEntity agent = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getAgentId, resolveAgentId(context)));
-            AgentConfigEntity config = agentConfigRepository.selectOne(new LambdaQueryWrapper<AgentConfigEntity>().eq(AgentConfigEntity::getConfigId, agent.getConfigId()));
-
-            appendMessage(context.conversationId(), context.role(), context.userMessage(), (context.senderName() != null) ? context.senderName() : "user");
-            agentContextManager.onAgentCalled(agent.getAgentId(), context.userMessage(), (context.senderName() != null) ? context.senderName() : "user");
-
-            injectMcpHeaders(config, agent.getAgentId(), agent.getConversationId(), curTaskId);
-
-            // 标记 Agent 为忙碌（仅在非子任务时）
-            if (!context.isSubTask()) {
-                markAgentBusy(agent.getAgentId(), curTaskId);
-            }
-
-            RunTaskRequest req = RunTaskRequest.newBuilder()
-                    .setRequestId(UUID.randomUUID().toString()).setSessionId(agent.getConversationId())
-                    .setPrompt(context.userMessage()).setSessionConfig(ConfigProtoConverter.toSessionConfig(config))
-                    .setHistoryRollout(ByteString.copyFrom(agent.getActiveContextBytes())).build();
-
-            final StringBuilder sb = new StringBuilder();
-            // 执行 Codex 调用
-            codexAgentClient.runTask(agent.getConversationId(), req, new StreamObserver<codex.agent.RunTaskResponse>() {
-                @Override
-                public void onNext(codex.agent.RunTaskResponse p) {
-                    try {
-                        InternalCodexEvent e = InternalCodexEventConverter.toInternalEvent(p);
-                        if (e == null) return;
-                        e.setSenderName(agent.getAgentName());
-                        e.setAgentId(agent.getAgentId());
-                        persist(context.conversationId(), agent.getAgentId(), agent.getAgentName(), e);
-                        collectTextRobustly(e, sb);
-
-                        if (e.getStatus() == InternalCodexEvent.Status.FINISHED) {
-                            // 正常完成
-                            log.info("[onNext-FINISHED] 检查 updatedRollout: hasRollout={}, size={}",
-                                e.getUpdatedRollout() != null,
-                                e.getUpdatedRollout() != null ? e.getUpdatedRollout().length : 0);
-
-                            if (e.getUpdatedRollout() != null && e.getUpdatedRollout().length > 0) {
-                                agent.setActiveContextFromBytes(e.getUpdatedRollout());
-
-                                // 关键：立即保存到数据库，防止被后续操作覆盖
-                                int updateResult = agentRepository.updateById(agent);
-
-                                log.info("[FINISHED] 已持久化 updatedRollout: agentId={}, size={} bytes, updateResult={}",
-                                    agent.getAgentId(), e.getUpdatedRollout().length, updateResult);
-
-                                // ⚠️ 跳过验证，因为后续的 setAgentState 可能会再次更新 Agent
-                                // 验证逻辑移到最后，在所有状态更新完成后进行
-                            } else {
-                                log.warn("[FINISHED] updatedRollout 为空！agentId={}, eventType={}",
-                                    agent.getAgentId(), e.getEventType());
-                            }
-
-                            // 替换原有的 updateOutputState，使用 ContextManager 统一管理状态 (设置为 IDLE)
-                            agentContextManager.onAgentResponse(agent.getAgentId(), sb.toString());
-
-                            // ⚠️ 关键修复：在状态更新完成后，验证 activeContext 是否仍然存在
-                            // 因为 setAgentState 可能会触发额外的更新
-                            try {
-                                Thread.sleep(50); // 等待可能的并发操作完成
-                                AgentEntity finalAgent = agentRepository.selectById(agent.getAgentId());
-                                if (finalAgent != null && finalAgent.hasActiveContext()) {
-                                    log.info("[FINISHED-最终验证] activeContext 保存成功: agentId={}, length={}",
-                                        agent.getAgentId(), finalAgent.getActiveContext().length());
-                                } else {
-                                    log.error("[FINISHED-最终验证] activeContext 丢失! agentId={}", agent.getAgentId());
-                                }
-                            } catch (Exception ex) {
-                                log.warn("[FINISHED] 最终验证失败: agentId={}, error={}", agent.getAgentId(), ex.getMessage());
-                            }
-                        } else {
-                            // 处理过程中的事件更新 (Thinking, Call Tool...)
-                            agentContextManager.onCodexEvent(agent.getAgentId(), e);
-                        }
-                        
-                        eventConsumer.accept(e);
-                    } catch (Exception ex) {
-                        log.error("Next fail", ex);
-                    }
-                }
-
-                @Override
-                public void onError(Throwable t) {
-                    if (!context.isSubTask()) {
-                        // 标记 Agent 为空闲
-                        markAgentFree(context.agentId());
-                    }
-                    onError.accept(t);
-                }
-
-                @Override
-                public void onCompleted() {
-                    if (!context.isSubTask()) {
-                        log.info("[onCompleted] 父任务完成: convId={}",
-                            context.conversationId());
-                        // 标记 Agent 为空闲
-                        markAgentFree(context.agentId());
-                        onCompleted.run();
-                    }
-                }
-            });
-        } catch (Exception e) { log.error("Execution error", e); onError.accept(e); }
-    }
-
-    private void collectTextRobustly(InternalCodexEvent event, StringBuilder accumulator) {
-        try {
-            String json = event.getRawEventJson();
-            if (json == null) return;
-            JsonNode node = objectMapper.readTree(json);
-            String itemText = node.path("item").path("text").asText("");
-            if (!itemText.isEmpty() && accumulator.indexOf(itemText) == -1) { accumulator.append(itemText); return; }
-            String deltaText = node.path("delta").path("text").asText("");
-            if (!deltaText.isEmpty()) { accumulator.append(deltaText); return; }
-            JsonNode content = node.path("content");
-            if (content.isArray()) {
-                StringBuilder sb = new StringBuilder();
-                for (JsonNode part : content) if (part.has("text")) sb.append(part.get("text").asText());
-                if (sb.length() > accumulator.length()) { accumulator.setLength(0); accumulator.append(sb); }
-            }
-        } catch (Exception ignored) {}
-    }
-
-    private String resolveAgentId(ExecutionContext c) {
-        if (c.agentId() != null && !c.agentId().isEmpty()) return c.agentId();
-        AgentEntity p = agentRepository.selectOne(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getConversationId, c.conversationId()).eq(AgentEntity::getIsPrimary, true));
-        if (p == null) throw new AgentOzException(AgentOzErrorCode.PRIMARY_AGENT_MISSING, c.conversationId());
-        return p.getAgentId();
-    }
-
-    private void injectMcpHeaders(AgentConfigEntity cfg, String aid, String cid, String tid) {
-        try {
-            ObjectNode r = (cfg.getMcpConfigJson() == null || cfg.getMcpConfigJson().isEmpty()) ? objectMapper.createObjectNode() : (ObjectNode) objectMapper.readTree(cfg.getMcpConfigJson());
-            ObjectNode m = r.has("mcp_servers") ? (ObjectNode) r.get("mcp_servers") : r;
-            m.fieldNames().forEachRemaining(n -> {
-                JsonNode j = m.get(n);
-                if (j.isObject()) {
-                    ObjectNode h = j.has("http_headers") ? (ObjectNode) j.get("http_headers") : objectMapper.createObjectNode();
-                    h.put("X-Agent-ID", aid); h.put("X-Conversation-ID", cid);
-                    ((ObjectNode) j).set("http_headers", h);
-                }
-            });
-            String tk = jwtUtils.generateToken(aid, cid);
-            ObjectNode sys = objectMapper.createObjectNode(); sys.put("server_type", "streamable_http"); sys.put("url", websiteUrl + "/mcp/message");
-            ObjectNode sh = objectMapper.createObjectNode(); sh.put("Authorization", "Bearer " + tk); sh.put("X-Agent-ID", aid); sh.put("X-Conversation-ID", cid);
-            sys.set("http_headers", sh); m.set("agentoz_system", sys);
-            cfg.setMcpConfigJson(objectMapper.writeValueAsString(r));
-        } catch (Exception ignored) {}
-    }
 
     private void persist(String conversationId, String agentId, String senderName, InternalCodexEvent event) {
         try {
@@ -384,15 +170,6 @@ public class AgentExecutionManager {
         } catch (Exception ignored) {}
     }
 
-    private void appendMessage(String cid, String role, String contentText, String senderName) {
-        ObjectNode content = objectMapper.createObjectNode();
-        content.put("type", "text");
-        content.put("text", contentText);
-
-        ObjectNode item = objectMapper.createObjectNode();
-        item.set("item", content);
-        item.put("type", "agent_message");
-    }
     /**
      * 截断字符串到指定长度
      */

@@ -145,6 +145,12 @@ public class OrchestrationSession {
      * 发送事件到所有订阅者
      */
     public void sendEvent(com.deepknow.agentoz.dto.InternalCodexEvent event) {
+        // 确保 subscribers 列表已初始化
+        if (subscribers == null) {
+            log.warn("🔧 [OrchestrationSession] subscribers 列表为 null，跳过发送: sessionId={}", sessionId);
+            return;
+        }
+
         // 发送给所有订阅者
         subscribers.forEach(subscriber -> {
             try {
@@ -250,6 +256,11 @@ public class OrchestrationSession {
      * @param subscriber 事件消费者
      */
     public void subscribe(Consumer<com.deepknow.agentoz.dto.InternalCodexEvent> subscriber) {
+        // 确保 subscribers 列表已初始化
+        if (subscribers == null) {
+            log.warn("🔧 [OrchestrationSession] subscribers 列表未初始化，重新初始化: sessionId={}", sessionId);
+            subscribers = new java.util.concurrent.CopyOnWriteArrayList<>();
+        }
         subscribers.add(subscriber);
         log.info("📡 [OrchestrationSession] 新订阅者: sessionId={}, subscribers={}",
                 sessionId, subscribers.size());

@@ -291,12 +291,19 @@ public class AgentOrchestrator implements AgentExecutionService {
             }
         });
 
-        log.info("[Orchestrator] 订阅成功: convId={}, subscribers={}",
-                conversationId, session.getSubscriberCount());
+        log.info("[Orchestrator] 订阅成功: convId={}, subscribers={}, status={}, activeTasks={}",
+                conversationId, session.getSubscriberCount(), session.getStatus(), session.getActiveTaskCount());
 
-        // 设置完成回调：当会话结束时自动完成流
-        // 注意：这里不会立即调用onCompleted，而是等待会话真正结束
-        // 会话结束时，OrchestrationSession会通知所有订阅者
+        // 如果会话已经空闲（没有活跃任务），立即完成流
+        if (session.getStatus() == OrchestrationSession.SessionStatus.IDLE &&
+            session.getActiveTaskCount() == 0) {
+            log.info("[Orchestrator] 会话空闲且无活跃任务，完成订阅流: convId={}", conversationId);
+            responseObserver.onCompleted();
+            return;
+        }
+
+        // 注意：对于活跃会话，这里不调用 onCompleted()，而是让会话自然结束时通过回调完成
+        // 会话结束时，OrchestrationSession 会通知所有订阅者
     }
 
     // ========== 主会话管理 ==========
