@@ -83,7 +83,7 @@ public class RedisOrchestrationSessionRepository {
                 return null;
             }
 
-            // 重建 Session 对象（注意：subscribers 不会被持久化，需要重新注册）
+            // 重建 Session 对象
             OrchestrationSession session = OrchestrationSession.builder()
                     .sessionId(data.getSessionId())
                     .mainTaskId(data.getMainTaskId())
@@ -91,8 +91,20 @@ public class RedisOrchestrationSessionRepository {
                     .status(OrchestrationSession.SessionStatus.valueOf(data.getStatus()))
                     .build();
 
+            // ✅ 手动设置默认值（防止 @Builder.Default 不生效）
+            if (session.getStatus() == null) {
+                log.warn("⚠️ [RedisSession] Status is null after build, setting default: sessionId={}", conversationId);
+                session.setStatus(OrchestrationSession.SessionStatus.ACTIVE);
+            }
+            if (session.getCreatedAt() == null) {
+                session.setCreatedAt(java.time.LocalDateTime.now());
+            }
+            if (session.getUpdatedAt() == null) {
+                session.setUpdatedAt(java.time.LocalDateTime.now());
+            }
+
             log.info("✅ [RedisSession] Session loaded from Redis: sessionId={}, status={}",
-                    conversationId, data.getStatus());
+                    conversationId, session.getStatus());
 
             return session;
         } catch (Exception e) {
