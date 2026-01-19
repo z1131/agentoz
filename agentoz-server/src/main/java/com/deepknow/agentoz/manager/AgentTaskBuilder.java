@@ -123,7 +123,7 @@ public class AgentTaskBuilder {
      *
      * <p>功能：</p>
      * <ul>
-     *   <li>为所有 MCP 服务器添加统一的请求头（X-Agent-ID, X-Conversation-ID, X-A2A-Parent-Task-ID）</li>
+     *   <li>为所有 MCP 服务器添加统一的请求头（X-Agent-ID, X-Conversation-ID）</li>
      *   <li>注入 agentoz_system 自定义 MCP 服务器</li>
      *   <li>生成 JWT Token 用于认证</li>
      * </ul>
@@ -154,7 +154,6 @@ public class AgentTaskBuilder {
                     // 注入统一请求头
                     headers.put("X-Agent-ID", agentId);
                     headers.put("X-Conversation-ID", conversationId);
-                    headers.put("X-A2A-Parent-Task-ID", taskId);
 
                     serverObj.set("http_headers", headers);
                 }

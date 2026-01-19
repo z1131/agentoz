@@ -17,7 +17,6 @@ import com.deepknow.agentoz.model.AgentEntity;
 import com.deepknow.agentoz.model.ConversationEntity;
 import codex.agent.RunTaskRequest;
 import codex.agent.SessionConfig;
-import io.a2a.spec.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -250,15 +249,6 @@ public class AgentExecutionManager {
         } catch (Exception e) { log.error("Execution error", e); onError.accept(e); }
     }
 
-    private String extractResult(Task task) {
-        if (task.getArtifacts() == null) return "No result";
-        StringBuilder res = new StringBuilder();
-        for (Artifact art : task.getArtifacts()) {
-            if (art.parts() != null) for (Part<?> p : art.parts()) if (p instanceof TextPart) res.append(((TextPart) p).getText());
-        }
-        return res.toString();
-    }
-
     private void collectTextRobustly(InternalCodexEvent event, StringBuilder accumulator) {
         try {
             String json = event.getRawEventJson();
@@ -293,7 +283,6 @@ public class AgentExecutionManager {
                 if (j.isObject()) {
                     ObjectNode h = j.has("http_headers") ? (ObjectNode) j.get("http_headers") : objectMapper.createObjectNode();
                     h.put("X-Agent-ID", aid); h.put("X-Conversation-ID", cid);
-                    h.put("X-A2A-Parent-Task-ID", tid);
                     ((ObjectNode) j).set("http_headers", h);
                 }
             });

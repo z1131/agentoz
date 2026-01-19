@@ -10,8 +10,10 @@ import com.deepknow.agentoz.dto.InternalCodexEvent;
 import com.deepknow.agentoz.executor.AgentTaskExecutor;
 import com.deepknow.agentoz.manager.AgentTaskBuilder;
 import com.deepknow.agentoz.infra.repo.AgentRepository;
+import com.deepknow.agentoz.infra.repo.AsyncTaskRepository;
 import com.deepknow.agentoz.manager.converter.TaskResponseConverter;
 import com.deepknow.agentoz.model.AgentEntity;
+import com.deepknow.agentoz.model.AsyncTaskEntity;
 import com.deepknow.agentoz.model.OrchestrationSession;
 import com.deepknow.agentoz.service.ConversationHistoryService;
 import com.deepknow.agentoz.service.RedisAgentTaskQueue;
@@ -21,6 +23,7 @@ import org.apache.dubbo.common.stream.StreamObserver;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.stereotype.Component;
 
+import jakarta.annotation.PostConstruct;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -60,6 +63,7 @@ import java.util.function.Consumer;
 public class AgentOrchestrator implements AgentExecutionService {
 
     private final AgentRepository agentRepository;
+    private final AsyncTaskRepository asyncTaskRepository;
     private final AgentTaskExecutor taskExecutor;
     private final AgentTaskBuilder taskBuilder;
     private final RedisAgentTaskQueue redisAgentTaskQueue;
@@ -69,6 +73,70 @@ public class AgentOrchestrator implements AgentExecutionService {
      * 会话管理器（单例，所有实例共享）
      */
     private final OrchestrationSessionManager sessionManager = OrchestrationSessionManager.getInstance();
+
+    @PostConstruct
+    public void startConsumer() {
+        Thread.startVirtualThread(() -> {
+            log.info("🚀 [Orchestrator] 启动全局任务消费者线程 (Redisson监听中)...");
+            while (true) {
+                try {
+                    // 1. 阻塞获取任务 (Redisson Blocking Queue)
+                    String taskId = redisAgentTaskQueue.takeGlobalTask();
+                    
+                    // 2. 调度任务
+                    dispatchTask(taskId);
+                    
+                } catch (InterruptedException e) {
+                    log.warn("消费者线程被中断", e);
+                    break;
+                } catch (Exception e) {
+                    log.error("消费者循环异常", e);
+                    // 防止死循环刷屏，稍作休眠
+                    try { Thread.sleep(1000); } catch (Exception ignored) {}
+                }
+            }
+        });
+    }
+
+    /**
+     * 调度中心核心逻辑：路由任务
+     */
+    private void dispatchTask(String taskId) {
+        // 1. 获取任务详情
+        AsyncTaskEntity task = asyncTaskRepository.findByTaskId(taskId);
+        if (task == null) {
+            log.warn("⚠️ 收到任务但数据库不存在: taskId={}", taskId);
+            return;
+        }
+
+        String agentId = task.getAgentId();
+        
+        // 2. 检查会话是否还活跃
+        OrchestrationSession session = sessionManager.getSession(task.getConversationId());
+        // 注意：如果是唤醒任务，session 可能已经不存在了（或者需要重新加载）。
+        // 这里的逻辑：如果 session 还在内存，直接用。不在内存，可能需要恢复？
+        // 目前简化：假设 Session 还在，或者对于唤醒任务，我们只关心 Agent 执行。
+        // 但 executeTaskAsync 需要 session 对象来 sendEvent。
+        // 如果 session 没了，我们可能需要重建一个“临时Session”或者抛弃。
+        if (session == null) {
+            log.warn("⚠️ 任务所属会话不存在 (可能已失效): convId={}, taskId={}", task.getConversationId(), taskId);
+            // 尝试重建 session? 或者不做处理。
+            // 暂时跳过
+            return;
+        }
+
+        // 3. 检查 Agent 是否忙碌
+        // 注意：这是一个临界区，但在单节点下是安全的。分布式下需要锁。
+        // RedissonQueue 内部加锁会更安全，但这里我们在 Orchestrator 做路由。
+        // 如果 Agent 忙，放入 Backlog。
+        if (redisAgentTaskQueue.isAgentBusy(agentId)) {
+            log.info("🔒 Agent 忙碌，任务转入积压队列: agentId={}, taskId={}", agentId, taskId);
+            redisAgentTaskQueue.addToBacklog(agentId, taskId);
+        } else {
+            // 4. Agent 空闲，立即执行
+            executeQueuedTask(session, taskId, agentId);
+        }
+    }
 
     // ========== 实现 AgentExecutionService 接口 ==========
 
@@ -354,6 +422,38 @@ public class AgentOrchestrator implements AgentExecutionService {
         return taskId;
     }
 
+    /**
+     * 执行队列中的任务（恢复执行）
+     */
+    private void executeQueuedTask(
+            OrchestrationSession session,
+            String taskId,
+            String agentId
+    ) {
+        log.info("[Orchestrator] 恢复执行队列任务: taskId={}, agentId={}", taskId, agentId);
+
+        // 1. 获取任务详情
+        AsyncTaskEntity task = asyncTaskRepository.findByTaskId(taskId);
+        if (task == null) {
+            log.error("[Orchestrator] 队列任务不存在或已删除: taskId={}", taskId);
+            // 标记 Agent 空闲，否则它永远忙碌
+            redisAgentTaskQueue.markAgentFree(agentId);
+            return;
+        }
+
+        // 2. 标记忙碌
+        redisAgentTaskQueue.markAgentBusy(agentId, taskId);
+
+        // 3. 更新状态为 RUNNING
+        task.setStatus(com.deepknow.agentoz.enums.AsyncTaskStatus.RUNNING);
+        task.setStartTime(java.time.LocalDateTime.now());
+        asyncTaskRepository.updateById(task);
+
+        // 4. 使用 Virtual Thread 执行
+        // 注意：这里使用 taskDescription 作为 userMessage
+        executeTaskAsync(session, agentId, task.getTaskDescription(), taskId, true, null);
+    }
+
     // ========== 核心执行逻辑 ==========
 
     /**
@@ -435,7 +535,7 @@ public class AgentOrchestrator implements AgentExecutionService {
                         } else {
                             // 处理队列中的下一个任务
                             redisAgentTaskQueue.processNextTask(agentId,
-                                    nextTaskDesc -> executeSubTask(session, taskId, agentId, nextTaskDesc));
+                                    queuedTaskId -> executeQueuedTask(session, queuedTaskId, agentId));
 
                             session.completeSubTask(taskId);
                             redisAgentTaskQueue.markAgentFree(agentId);

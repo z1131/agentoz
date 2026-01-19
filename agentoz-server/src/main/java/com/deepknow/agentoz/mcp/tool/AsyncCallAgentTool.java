@@ -217,10 +217,7 @@ public class AsyncCallAgentTool {
             log.debug("🔍 查询任务状态: taskId={}, status={}", taskId, task.getStatus());
 
             return switch (task.getStatus()) {
-                case QUEUED -> {
-                    long queuePosition = redisAgentTaskQueue.getPosition(task.getAgentId(), taskId);
-                    yield createQueuedStatusResponse(task, (int) queuePosition);
-                }
+                case QUEUED -> createQueuedStatusResponse(task);
 
                 case RUNNING -> createRunningStatusResponse(task);
 
@@ -254,20 +251,7 @@ public class AsyncCallAgentTool {
             """, taskId, agentName, agentName);
     }
 
-    /**
-     * 创建已排队响应
-     */
-    private String createQueuedResponse(String taskId, String agentName, int queuePosition) {
-        return String.format("""
-            {
-              "taskId": "%s",
-              "status": "QUEUED",
-              "message": "Agent %s 正在执行其他任务，您的任务已排入队列（第 %d 位）",
-              "queuePosition": %d,
-              "agentName": "%s"
-            }
-            """, taskId, agentName, queuePosition, queuePosition, agentName);
-    }
+
 
     /**
      *创建错误响应
@@ -284,17 +268,16 @@ public class AsyncCallAgentTool {
     /**
      * 创建排队状态响应
      */
-    private String createQueuedStatusResponse(AsyncTaskEntity task, int queuePosition) {
+    private String createQueuedStatusResponse(AsyncTaskEntity task) {
         return String.format("""
             {
               "taskId": "%s",
               "status": "QUEUED",
-              "message": "任务排队中，前方还有 %d 个任务",
-              "queuePosition": %d,
+              "message": "任务排队中",
               "agentName": "%s",
               "submitTime": "%s"
             }
-            """, task.getTaskId(), queuePosition, queuePosition,
+            """, task.getTaskId(),
             task.getAgentName(), task.getSubmitTime());
     }
 
