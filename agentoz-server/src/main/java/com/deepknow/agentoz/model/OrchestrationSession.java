@@ -10,6 +10,8 @@ import org.slf4j.LoggerFactory;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 /**
@@ -19,8 +21,15 @@ import java.util.function.Consumer;
  * <ul>
  *   <li>管理 SSE 连接（事件流）</li>
  *   <li>跟踪主任务和子任务的关系</li>
-   *   <li>转发事件到正确的 Agent</li>
+ *   <li>转发事件到正确的 Agent</li>
  *   <li>管理会话生命周期</li>
+ * </ul>
+ *
+ * <h3>🔒 线程安全改进</h3>
+ * <ul>
+ *   <li>使用单线程事件调度器，确保 StreamObserver.onNext() 串行调用</li>
+ *   <li>虚拟线程产生的事件 → 调度器队列 → 单线程发送</li>
+ *   <li>避免 StreamObserver 并发写入导致的异常</li>
  * </ul>
  */
 @Data
@@ -70,7 +79,7 @@ public class OrchestrationSession {
     private Consumer<com.deepknow.agentoz.dto.InternalCodexEvent> eventConsumer;
 
     /**
-     * 子任务映射：parent_task_id -> List<child_task_id>
+     * 子任务映射：parent_task_id -> List<child-task_id>
      */
     @Builder.Default
     private Map<String, java.util.List<String>> taskTree = new ConcurrentHashMap<>();
@@ -98,11 +107,62 @@ public class OrchestrationSession {
     private String cancelReason;
 
     /**
+     * 流关闭标志（防止 onCompleted 多次调用）
+     *
+     * <p>为什么需要？</p>
+     * <ul>
+     *   <li>多个任务可能同时完成（并发）</li>
+     *   <li>竞态条件可能导致 onCompleted 被多次调用</li>
+     *   <li>Dubbo/gRPC 的 StreamObserver.onCompleted() 只能调用一次</li>
+     * </ul>
+     */
+    @Builder.Default
+    private java.util.concurrent.atomic.AtomicBoolean streamClosed = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /**
      * 事件订阅者列表（支持多个 SSE 连接同时订阅）
      */
     @Builder.Default
     private java.util.List<Consumer<com.deepknow.agentoz.dto.InternalCodexEvent>> subscribers =
             new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /**
+     * 事件调度器（单线程执行器，确保 StreamObserver.onNext() 串行调用）
+     *
+     * <p>为什么需要单线程调度器？</p>
+     * <ul>
+     *   <li>Dubbo/gRPC 的 StreamObserver 不是线程安全的</li>
+     *   <li>虚拟线程可能并发产生事件</li>
+     *   <li>必须保证 onNext() 串行调用，否则会导致：</li>
+     *   <ul>
+     *     <li>消息乱序</li>
+     *     <li>IllegalStateException: call already half-closed</li>
+     *     <li>数据帧损坏</li>
+     *   </ul>
+     * </ul>
+     *
+     * <p>为什么不使用 Executors.newSingleThreadExecutor()？</p>
+     * <ul>
+     *   <li>阿里巴巴开发手册禁止使用 Executors 工具方法</li>
+     *   <li>无界队列可能导致 OOM</li>
+     *   <li>需要显式配置拒绝策略和队列大小</li>
+     * </ul>
+     */
+    @Builder.Default
+    private transient ExecutorService eventDispatcher = new java.util.concurrent.ThreadPoolExecutor(
+            1,                                      // corePoolSize: 核心线程数
+            1,                                      // maximumPoolSize: 最大线程数
+            0L,                                     // keepAliveTime: 空闲线程存活时间
+            java.util.concurrent.TimeUnit.MILLISECONDS,
+            new java.util.concurrent.ArrayBlockingQueue<>(1000), // 有界队列，防止 OOM
+            r -> {                                  // 自定义线程工厂
+                Thread t = new Thread(r, "event-dispatcher-" + System.currentTimeMillis());
+                t.setDaemon(true);                 // 守护线程，JVM 退出时不阻塞
+                t.setPriority(Thread.NORM_PRIORITY); // 正常优先级
+                return t;
+            },
+            new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy() // 拒绝策略：调用者运行
+    );
 
     /**
      * 会话状态枚举
@@ -142,7 +202,14 @@ public class OrchestrationSession {
     }
 
     /**
-     * 发送事件到所有订阅者
+     * 发送事件到所有订阅者（线程安全版本）
+     *
+     * <p>实现细节：</p>
+     * <ul>
+     *   <li>调用线程：虚拟线程（并发）</li>
+     *   <li>调度器：单线程执行器</li>
+     *   <li>实际发送：调度器线程（串行）</li>
+     * </ul>
      */
     public void sendEvent(com.deepknow.agentoz.dto.InternalCodexEvent event) {
         // 确保 subscribers 列表已初始化
@@ -151,24 +218,35 @@ public class OrchestrationSession {
             return;
         }
 
-        // 发送给所有订阅者
-        subscribers.forEach(subscriber -> {
+        // 异步提交到单线程调度器（避免阻塞虚拟线程）
+        eventDispatcher.submit(() -> {
             try {
-                subscriber.accept(event);
+                // 发送给所有订阅者（在调度器线程中串行执行）
+                subscribers.forEach(subscriber -> {
+                    try {
+                        subscriber.accept(event);
+                    } catch (Exception e) {
+                        // 订阅者断开，自动移除
+                        log.warn("🔌 [OrchestrationSession] 订阅者异常，移除: sessionId={}, error={}",
+                                sessionId, e.getMessage());
+                        subscribers.remove(subscriber);
+                    }
+                });
+
+                // 兼容旧的 eventConsumer（如果存在）
+                if (eventConsumer != null) {
+                    try {
+                        eventConsumer.accept(event);
+                    } catch (Exception e) {
+                        log.debug("[OrchestrationSession] eventConsumer 异常: sessionId={}, error={}",
+                                sessionId, e.getMessage());
+                    }
+                }
             } catch (Exception e) {
-                // 订阅者断开，自动移除
-                subscribers.remove(subscriber);
+                log.error("[OrchestrationSession] 事件发送失败: sessionId={}, eventType={}",
+                        sessionId, event.getEventType(), e);
             }
         });
-
-        // 兼容旧的 eventConsumer（如果存在）
-        if (eventConsumer != null) {
-            try {
-                eventConsumer.accept(event);
-            } catch (Exception e) {
-                // 忽略异常
-            }
-        }
     }
 
     /**
@@ -292,5 +370,62 @@ public class OrchestrationSession {
      */
     public int getSubscriberCount() {
         return subscribers.size();
+    }
+
+    /**
+     * 尝试关闭流（线程安全，只执行一次）
+     *
+     * <p>使用 CAS (Compare-And-Swap) 确保即使在多线程并发调用的情况下，
+     * onComplete 回调也只会执行一次</p>
+     *
+     * @param onComplete 完成回调
+     * @return true 如果成功关闭（第一次调用），false 如果已经关闭
+     */
+    public boolean tryCloseStream(Runnable onComplete) {
+        // CAS 操作：只有当 streamClosed 为 false 时才设置为 true
+        if (streamClosed.compareAndSet(false, true)) {
+            log.info("🔒 [OrchestrationSession] 流关闭锁获取成功: sessionId={}", sessionId);
+            try {
+                if (onComplete != null) {
+                    onComplete.run();
+                }
+                return true;
+            } catch (Exception e) {
+                log.error("[OrchestrationSession] onComplete 回调执行失败: sessionId={}", sessionId, e);
+                return false;
+            }
+        } else {
+            log.debug("🔒 [OrchestrationSession] 流已经关闭，跳过重复调用: sessionId={}", sessionId);
+            return false;
+        }
+    }
+
+    /**
+     * 检查流是否已关闭
+     */
+    public boolean isStreamClosed() {
+        return streamClosed.get();
+    }
+
+    /**
+     * 关闭会话（释放资源）
+     *
+     * <p>注意：必须在会话不再使用时调用，否则会泄漏线程</p>
+     */
+    public void close() {
+        if (eventDispatcher != null && !eventDispatcher.isShutdown()) {
+            log.info("🔒 [OrchestrationSession] 关闭事件调度器: sessionId={}", sessionId);
+            eventDispatcher.shutdown();
+            try {
+                if (!eventDispatcher.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                    log.warn("⚠️ [OrchestrationSession] 事件调度器未能在5秒内关闭，强制关闭: sessionId={}", sessionId);
+                    eventDispatcher.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                log.error("[OrchestrationSession] 关闭事件调度器被中断: sessionId={}", sessionId, e);
+                eventDispatcher.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 }

@@ -65,19 +65,19 @@ public class AgentOrchestrator implements AgentExecutionService {
     private final AgentRepository agentRepository;
     private final AsyncTaskRepository asyncTaskRepository;
     private final AgentTaskExecutor taskExecutor;
-    private final AgentTaskBuilder taskBuilder;
     private final RedisAgentTaskQueue redisAgentTaskQueue;
     private final ConversationHistoryService conversationHistoryService;
+    private final OrchestrationSessionManager sessionManager;
+    private final com.deepknow.agentoz.scheduler.BacklogScheduler backlogScheduler;
+    private final org.redisson.api.RedissonClient redissonClient;
 
-    /**
-     * 会话管理器（单例，所有实例共享）
-     */
-    private final OrchestrationSessionManager sessionManager = OrchestrationSessionManager.getInstance();
+    // 移除手动获取 sessionManager
+    // private final OrchestrationSessionManager sessionManager = OrchestrationSessionManager.getInstance();
 
     @PostConstruct
     public void startConsumer() {
         Thread.startVirtualThread(() -> {
-            log.info("🚀 [Orchestrator] 启动全局任务消费者线程 (Redisson监听中)...");
+            log.info("[Orchestrator] 启动全局任务消费者线程 (Redisson监听中)...");
             while (true) {
                 try {
                     // 1. 阻塞获取任务 (Redisson Blocking Queue)
@@ -100,6 +100,20 @@ public class AgentOrchestrator implements AgentExecutionService {
 
     /**
      * 调度中心核心逻辑：路由任务
+     *
+     * <p>分布式环境改进：</p>
+     * <ul>
+     *   <li>sessionManager.getSession() 会自动从 Redis 恢复远程会话</li>
+     *   <li>如果 Redis 也不存在，说明会话已过期，任务将被丢弃</li>
+     *   <li>使用 Redisson 分布式锁保证 check-and-set-busy 的原子性</li>
+     * </ul>
+     *
+     * <p>🔒 分布式锁保证原子操作：</p>
+     * <ul>
+     *   <li>防止多个消费者线程同时判定同一个 Agent 空闲</li>
+     *   <li>保证 check-then-set 的原子性</li>
+     *   <li>避免 Agent 并行执行多个任务</li>
+     * </ul>
      */
     private void dispatchTask(String taskId) {
         // 1. 获取任务详情
@@ -110,31 +124,45 @@ public class AgentOrchestrator implements AgentExecutionService {
         }
 
         String agentId = task.getAgentId();
-        
-        // 2. 检查会话是否还活跃
+
+        // 2. 获取会话（分布式改进：会自动从 Redis 恢复远程节点的会话）
         OrchestrationSession session = sessionManager.getSession(task.getConversationId());
-        // 注意：如果是唤醒任务，session 可能已经不存在了（或者需要重新加载）。
-        // 这里的逻辑：如果 session 还在内存，直接用。不在内存，可能需要恢复？
-        // 目前简化：假设 Session 还在，或者对于唤醒任务，我们只关心 Agent 执行。
-        // 但 executeTaskAsync 需要 session 对象来 sendEvent。
-        // 如果 session 没了，我们可能需要重建一个“临时Session”或者抛弃。
+
         if (session == null) {
-            log.warn("⚠️ 任务所属会话不存在 (可能已失效): convId={}, taskId={}", task.getConversationId(), taskId);
-            // 尝试重建 session? 或者不做处理。
-            // 暂时跳过
+            log.warn("⚠️ 任务所属会话不存在 (本地和 Redis 都未找到): convId={}, taskId={}",
+                    task.getConversationId(), taskId);
+            // 会话已过期或被删除，任务无法执行，直接跳过
             return;
         }
 
-        // 3. 检查 Agent 是否忙碌
-        // 注意：这是一个临界区，但在单节点下是安全的。分布式下需要锁。
-        // RedissonQueue 内部加锁会更安全，但这里我们在 Orchestrator 做路由。
-        // 如果 Agent 忙，放入 Backlog。
-        if (redisAgentTaskQueue.isAgentBusy(agentId)) {
-            log.info("🔒 Agent 忙碌，任务转入积压队列: agentId={}, taskId={}", agentId, taskId);
-            redisAgentTaskQueue.addToBacklog(agentId, taskId);
-        } else {
-            // 4. Agent 空闲，立即执行
+        // 3. 使用分布式锁保证原子操作
+        String lockKey = "agentoz:lock:agent:" + agentId;
+        org.redisson.api.RLock lock = redissonClient.getLock(lockKey);
+
+        try {
+            // 尝试获取锁（立即返回，不等待）
+            boolean acquired = lock.tryLock();
+
+            if (!acquired) {
+                // 锁获取失败，说明 Agent 忙碌（其他节点正在执行）
+                log.info("🔒 Agent 忙碌（被其他节点锁定），任务转入积压队列: agentId={}, taskId={}",
+                        agentId, taskId);
+                redisAgentTaskQueue.addToBacklog(agentId, taskId);
+                return;
+            }
+
+            // ✅ 获取锁成功，Agent 确实空闲，原子性地标记忙碌并执行
+            log.info("🔓 获取锁成功，Agent 空闲: agentId={}, taskId={}", agentId, taskId);
+
+            // 4. 执行任务（此时已持有锁，保证独占访问）
             executeQueuedTask(session, taskId, agentId);
+
+        } finally {
+            // 5. 释放锁（注意：executeQueuedTask 内部会 markAgentBusy，这里只需要释放锁）
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+                log.debug("🔓 释放锁: agentId={}", agentId);
+            }
         }
     }
 
@@ -425,6 +453,9 @@ public class AgentOrchestrator implements AgentExecutionService {
         session.addChildTask(parentTaskId, taskId);
         session.incrementActiveTasks();
 
+        // 分布式改进：同步活跃任务数到 Redis
+        sessionManager.updateSessionStatus(session.getSessionId(), null, session.getActiveTaskCount());
+
         return taskId;
     }
 
@@ -528,30 +559,33 @@ public class AgentOrchestrator implements AgentExecutionService {
 
                         if (!isSubTask) {
                             session.setStatus(OrchestrationSession.SessionStatus.IDLE);
+                            // 分布式改进：同步状态到 Redis
+                            sessionManager.updateSessionStatus(session.getSessionId(),
+                                    OrchestrationSession.SessionStatus.IDLE, session.getActiveTaskCount());
                             // 主任务完成时，检查是否还有活跃的子任务
                             if (session.getActiveTaskCount() == 0) {
-                                // 所有任务都完成，关闭流
+                                // 所有任务都完成，关闭流（线程安全：只执行一次）
                                 log.info("[Orchestrator] 所有任务完成，关闭流: convId={}", session.getSessionId());
-                                if (onComplete != null) {
-                                    onComplete.run();
-                                }
+                                session.tryCloseStream(onComplete);
                             } else {
                                 log.info("[Orchestrator] 主任务完成，但还有 {} 个子任务活跃，保持连接", session.getActiveTaskCount());
                             }
                         } else {
-                            // 处理队列中的下一个任务
-                            redisAgentTaskQueue.processNextTask(agentId,
-                                    queuedTaskId -> executeQueuedTask(session, queuedTaskId, agentId));
+                            // ✅ 优雅设计：通知调度器，而不是直接调度下一个任务
+                            redisAgentTaskQueue.markAgentFree(agentId);
 
                             session.completeSubTask(taskId);
-                            redisAgentTaskQueue.markAgentFree(agentId);
+                            // 分布式改进：同步活跃任务数到 Redis
+                            sessionManager.updateSessionStatus(session.getSessionId(), null, session.getActiveTaskCount());
+
+                            // 通知 Backlog 调度器：Agent 空闲了
+                            backlogScheduler.notifyAgentFree(agentId,
+                                    nextTaskId -> executeQueuedTask(session, nextTaskId, agentId));
 
                             // 子任务完成后，检查是否所有任务都完成
                             if (session.getActiveTaskCount() == 0) {
                                 log.info("[Orchestrator] 所有子任务完成，关闭流: convId={}", session.getSessionId());
-                                if (onComplete != null) {
-                                    onComplete.run();
-                                }
+                                session.tryCloseStream(onComplete);
                             }
                         }
                     }
@@ -562,18 +596,21 @@ public class AgentOrchestrator implements AgentExecutionService {
                                 taskId, t.getMessage());
 
                         session.setStatus(OrchestrationSession.SessionStatus.FAILED);
+                        // 分布式改进：同步状态到 Redis
+                        sessionManager.updateSessionStatus(session.getSessionId(),
+                                OrchestrationSession.SessionStatus.FAILED, session.getActiveTaskCount());
 
                         if (isSubTask) {
                             redisAgentTaskQueue.markAgentFree(agentId);
                             session.completeSubTask(taskId);
+                            // 分布式改进：同步活跃任务数到 Redis
+                            sessionManager.updateSessionStatus(session.getSessionId(), null, session.getActiveTaskCount());
                         }
 
                         // 任务失败时，检查是否所有任务都完成
                         if (session.getActiveTaskCount() == 0) {
                             log.info("[Orchestrator] 所有任务结束（含失败），关闭流: convId={}", session.getSessionId());
-                            if (onComplete != null) {
-                                onComplete.run();
-                            }
+                            session.tryCloseStream(onComplete);
                         }
                     }
                 });
@@ -582,8 +619,8 @@ public class AgentOrchestrator implements AgentExecutionService {
                 log.error("[VirtualThread] 任务异常: taskId={}, error={}",
                         taskId, e.getMessage(), e);
                 // 异常情况下，检查是否所有任务都完成
-                if (session.getActiveTaskCount() == 0 && onComplete != null) {
-                    onComplete.run();
+                if (session.getActiveTaskCount() == 0) {
+                    session.tryCloseStream(onComplete);
                 }
             }
         });

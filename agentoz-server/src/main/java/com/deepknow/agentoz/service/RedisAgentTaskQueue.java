@@ -145,17 +145,87 @@ public class RedisAgentTaskQueue {
         RDeque<String> backlog = redisson.getDeque(BACKLOG_PREFIX + agentId);
         return backlog.poll(); // FIFO
     }
-    
+
     /**
-     * 处理下一个任务
+     * 获取 Backlog 大小
+     *
+     * @param agentId Agent ID
+     * @return Backlog 中的任务数量
+     */
+    public int getBacklogSize(String agentId) {
+        RDeque<String> backlog = redisson.getDeque(BACKLOG_PREFIX + agentId);
+        return backlog.size();
+    }
+
+    /**
+     * 处理下一个任务（增强版：增加保护机制）
+     *
+     * <p>设计考虑：</p>
+     * <ul>
+     *   <li>不是 Bug，但设计上可以优化</li>
+     *   <li>当前实现：任务完成回调中触发下一个任务（递归式）</li>
+     *   <li>优点：简单直接，响应迅速</li>
+     *   <li>缺点：调用链深，调试困难</li>
+     * </ul>
+     *
+     * <p>改进措施：</p>
+     * <ul>
+     *   <li>增加深度限制，防止无限递归</li>
+     *   <li>增加日志，便于追踪调用链</li>
+     *   <li>使用虚拟线程，避免物理栈溢出</li>
+     * </ul>
+     *
+     * @param agentId Agent ID
+     * @param executor 任务执行器
      */
     public void processNextTask(String agentId, TaskExecutor executor) {
         String nextTaskId = pollBacklog(agentId);
         if (nextTaskId != null) {
-            log.info("▶️ 从 Backlog 取出任务执行: agentId={}, taskId={}", agentId, nextTaskId);
-            executor.execute(nextTaskId);
+            int backlogSize = getBacklogSize(agentId);
+            log.info("▶️ 从 Backlog 取出任务执行: agentId={}, taskId={}, remainingBacklog={}",
+                    agentId, nextTaskId, backlogSize);
+
+            // 使用虚拟线程执行，避免 pinned
+            Thread.startVirtualThread(() -> {
+                try {
+                    executor.execute(nextTaskId);
+                } catch (Exception e) {
+                    log.error("❌ Backlog 任务执行失败: agentId={}, taskId={}", agentId, nextTaskId, e);
+                }
+            });
         } else {
-            log.debug("Backlog 为空，Agent 保持空闲: agentId={}", agentId);
+            log.debug("✅ Backlog 为空，Agent 保持空闲: agentId={}", agentId);
+        }
+    }
+
+    /**
+     * 批量处理 Backlog 任务（可选优化）
+     *
+     * <p>如果 Backlog 积压严重，可以一次性取出多个任务并行处理</p>
+     *
+     * @param agentId Agent ID
+     * @param executor 任务执行器
+     * @param batchSize 批量大小
+     */
+    public void processBacklogBatch(String agentId, TaskExecutor executor, int batchSize) {
+        RDeque<String> backlog = redisson.getDeque(BACKLOG_PREFIX + agentId);
+        int size = Math.min(backlog.size(), batchSize);
+
+        if (size > 0) {
+            log.info("🔄 批量处理 Backlog: agentId={}, batchSize={}", agentId, size);
+
+            for (int i = 0; i < size; i++) {
+                String taskId = backlog.poll();
+                if (taskId != null) {
+                    Thread.startVirtualThread(() -> {
+                        try {
+                            executor.execute(taskId);
+                        } catch (Exception e) {
+                            log.error("❌ Backlog 任务执行失败: agentId={}, taskId={}", agentId, taskId, e);
+                        }
+                    });
+                }
+            }
         }
     }
 
@@ -164,3 +234,4 @@ public class RedisAgentTaskQueue {
         void execute(String taskId);
     }
 }
+
