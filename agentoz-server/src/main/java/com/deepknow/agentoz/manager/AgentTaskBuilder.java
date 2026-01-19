@@ -151,9 +151,13 @@ public class AgentTaskBuilder {
                             ? (ObjectNode) serverObj.get("http_headers")
                             : objectMapper.createObjectNode();
 
-                    // 注入统一请求头
-                    headers.put("X-Agent-ID", agentId);
-                    headers.put("X-Conversation-ID", conversationId);
+                    // 注入统一请求头（避免重复添加）
+                    if (!headers.has("X-Agent-ID")) {
+                        headers.put("X-Agent-ID", agentId);
+                    }
+                    if (!headers.has("X-Conversation-ID")) {
+                        headers.put("X-Conversation-ID", conversationId);
+                    }
 
                     serverObj.set("http_headers", headers);
                 }
