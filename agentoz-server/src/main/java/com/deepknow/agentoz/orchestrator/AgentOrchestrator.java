@@ -270,6 +270,12 @@ public class AgentOrchestrator implements AgentExecutionService {
             return null;
         }
 
+        // ✅ 空值保护
+        if (session.getStatus() == null) {
+            log.warn("⚠️ [Orchestrator] Session status is null: conversationId={}", conversationId);
+            session.setStatus(com.deepknow.agentoz.model.OrchestrationSession.SessionStatus.ACTIVE);
+        }
+
         SessionInfo info = new SessionInfo();
         info.setConversationId(session.getSessionId());
         info.setStatus(session.getStatus().name());
