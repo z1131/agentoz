@@ -138,6 +138,36 @@ public class AgentOrchestrator implements AgentExecutionService {
         };
     }
 
+    @Override
+    public void cancelTask(String conversationId) {
+        log.info("[Orchestrator] 收到取消任务请求: convId={}", conversationId);
+
+        OrchestrationSession session = sessionManager.getSession(conversationId);
+        if (session == null) {
+            log.warn("[Orchestrator] 会话不存在，无法取消: convId={}", conversationId);
+            return;
+        }
+
+        // 1. 标记会话为已取消
+        session.cancel("用户主动取消");
+
+        // 2. 发送取消事件到前端（如果 SSE 还连着）
+        try {
+            InternalCodexEvent cancelEvent = new InternalCodexEvent();
+            cancelEvent.setType("cancel");
+            cancelEvent.setContent("任务已取消");
+            session.sendEvent(cancelEvent);
+        } catch (Exception e) {
+            log.debug("[Orchestrator] SSE 已断开，无法发送取消事件: {}", conversationId);
+        }
+
+        // 3. 清理 Redis 队列中的待执行任务（如果有）
+        // 这里可以添加清理逻辑，但 RedisAgentTaskQueue 目前没有按 conversationId 清理的接口
+
+        log.info("[Orchestrator] 任务已取消: convId={}, activeTasks={}",
+                conversationId, session.getActiveTaskCount());
+    }
+
     // ========== 主会话管理 ==========
 
     /**

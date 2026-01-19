@@ -56,4 +56,26 @@ public interface AgentExecutionService {
      * @return 请求流（用于持续推送语音数据或文本插话）
      */
     StreamObserver<StreamChatRequest> streamInputExecuteTask(StreamObserver<StreamChatResponse> responseObserver);
+
+    /**
+     * 取消正在执行的任务
+     *
+     * <h3>🎯 使用场景</h3>
+     * <ul>
+     *   <li>用户点击"停止"按钮</li>
+     *   <li>前端 SSE 连接断开</li>
+     *   <li>需要紧急终止所有正在执行的 Agent</li>
+     * </ul>
+     *
+     * <h3>⚡ 行为</h3>
+     * <ul>
+     *   <li>取消会话中的所有任务（主任务 + 子任务）</li>
+     *   <li>停止向 SSE 推送事件</li>
+     *   <li>清理 Redis 队列中的待执行任务</li>
+     *   <li>更新会话状态为 CANCELLED</li>
+     * </ul>
+     *
+     * @param conversationId 会话 ID
+     */
+    void cancelTask(String conversationId);
 }

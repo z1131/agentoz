@@ -39,6 +39,7 @@ public class AgentTaskExecutor {
     private final AgentTaskBuilder taskBuilder;
     private final CodexAgentClient codexAgentClient;
     private final AgentExecutionManager executionManager;
+    private final com.deepknow.agentoz.orchestrator.OrchestrationSessionManager sessionManager;
 
     /**
      * 执行任务
@@ -65,6 +66,15 @@ public class AgentTaskExecutor {
                         @Override
                         public void onNext(RunTaskResponse response) {
                             try {
+                                // 检查是否应该停止任务
+                                com.deepknow.agentoz.model.OrchestrationSession session =
+                                        sessionManager.getSession(context.conversationId());
+                                if (session != null && session.shouldStop()) {
+                                    log.info("[TaskExecutor] 任务已取消，停止处理: taskId={}, reason={}",
+                                            context.taskId(), session.getCancelReason());
+                                    return; // 停止处理后续事件
+                                }
+
                                 // 转换事件
                                 InternalCodexEvent event = InternalCodexEventConverter.toInternalEvent(response);
                                 if (event == null) return;
@@ -100,6 +110,14 @@ public class AgentTaskExecutor {
 
                         @Override
                         public void onError(Throwable t) {
+                            // 检查是否是因为取消导致的错误
+                            com.deepknow.agentoz.model.OrchestrationSession session =
+                                    sessionManager.getSession(context.conversationId());
+                            if (session != null && session.shouldStop()) {
+                                log.info("[TaskExecutor] 任务已取消，不处理错误: taskId={}", context.taskId());
+                                return;
+                            }
+
                             log.error("[TaskExecutor] RPC 调用失败: taskId={}",
                                     context.taskId(), t);
                             eventHandler.onError(t);
@@ -107,6 +125,14 @@ public class AgentTaskExecutor {
 
                         @Override
                         public void onCompleted() {
+                            // 检查是否已取消
+                            com.deepknow.agentoz.model.OrchestrationSession session =
+                                    sessionManager.getSession(context.conversationId());
+                            if (session != null && session.shouldStop()) {
+                                log.info("[TaskExecutor] 任务已取消，不处理完成: taskId={}", context.taskId());
+                                return;
+                            }
+
                             log.info("[TaskExecutor] 任务完成: taskId={}, resultLength={}",
                                     context.taskId(), resultBuilder.length());
                             eventHandler.onComplete(resultBuilder.toString());
