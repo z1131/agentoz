@@ -38,6 +38,12 @@ public class RedisOrchestrationSessionRepository {
         try {
             String key = SESSION_PREFIX + session.getSessionId();
 
+            // 验证 session 状态
+            if (session.getStatus() == null) {
+                log.error("❌ [RedisSession] Session status is null, cannot save: sessionId={}", session.getSessionId());
+                return;
+            }
+
             // 序列化 Session（只序列化必要字段）
             SessionData data = new SessionData();
             data.setSessionId(session.getSessionId());
@@ -49,7 +55,8 @@ public class RedisOrchestrationSessionRepository {
             String json = objectMapper.writeValueAsString(data);
             redisTemplate.opsForValue().set(key, json, SESSION_TTL_MINUTES, TimeUnit.MINUTES);
 
-            log.debug("✅ [RedisSession] Session saved to Redis: sessionId={}", session.getSessionId());
+            log.debug("✅ [RedisSession] Session saved to Redis: sessionId={}, status={}",
+                    session.getSessionId(), session.getStatus().name());
         } catch (Exception e) {
             log.error("❌ [RedisSession] Failed to save session: sessionId={}", session.getSessionId(), e);
         }
@@ -69,6 +76,12 @@ public class RedisOrchestrationSessionRepository {
             }
 
             SessionData data = objectMapper.readValue(json, SessionData.class);
+
+            // 验证必要字段
+            if (data.getStatus() == null) {
+                log.error("❌ [RedisSession] Session status is null: conversationId={}", conversationId);
+                return null;
+            }
 
             // 重建 Session 对象（注意：subscribers 不会被持久化，需要重新注册）
             OrchestrationSession session = OrchestrationSession.builder()
