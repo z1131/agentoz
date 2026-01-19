@@ -4,6 +4,8 @@ import lombok.Data;
 import lombok.Builder;
 import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -26,6 +28,8 @@ import java.util.function.Consumer;
 @NoArgsConstructor
 @AllArgsConstructor
 public class OrchestrationSession {
+
+    private static final Logger log = LoggerFactory.getLogger(OrchestrationSession.class);
 
     /**
      * 会话唯一标识（对应 conversation_id）

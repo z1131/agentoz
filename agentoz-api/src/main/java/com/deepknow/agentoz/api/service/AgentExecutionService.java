@@ -93,4 +93,26 @@ public interface AgentExecutionService {
      * @return 会话状态信息，如果会话不存在返回 null
      */
     SessionInfo getSessionInfo(String conversationId);
+
+    /**
+     * 订阅会话事件流（用于SSE断线重连）
+     *
+     * <h3>🎯 使用场景</h3>
+     * <ul>
+     *   <li>前端刷新页面后重新连接到现有会话</li>
+     *   <li>多个客户端同时监听同一会话</li>
+     *   <li>SSE连接断开后自动恢复</li>
+     * </ul>
+     *
+     * <h3>⚡ 行为</h3>
+     * <ul>
+     *   <li>将提供的StreamObserver添加为会话的订阅者</li>
+     *   <li>后续的所有事件都会推送给该订阅者</li>
+     *   <li>如果会话不存在或已结束，立即完成流</li>
+     * </ul>
+     *
+     * @param conversationId 会话 ID
+     * @param responseObserver 响应流观察者
+     */
+    void subscribeToSession(String conversationId, StreamObserver<TaskResponse> responseObserver);
 }

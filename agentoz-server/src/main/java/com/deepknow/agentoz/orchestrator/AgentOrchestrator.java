@@ -154,9 +154,7 @@ public class AgentOrchestrator implements AgentExecutionService {
 
         // 2. 发送取消事件到前端（如果 SSE 还连着）
         try {
-            InternalCodexEvent cancelEvent = new InternalCodexEvent();
-            cancelEvent.setType("cancel");
-            cancelEvent.setContent("任务已取消");
+            InternalCodexEvent cancelEvent = InternalCodexEvent.processing("cancel", "{\"message\":\"任务已取消\"}");
             session.sendEvent(cancelEvent);
         } catch (Exception e) {
             log.debug("[Orchestrator] SSE 已断开，无法发送取消事件: {}", conversationId);
@@ -195,6 +193,42 @@ public class AgentOrchestrator implements AgentExecutionService {
         info.setActiveTaskCount(session.getActiveTaskCount());
 
         return info;
+    }
+
+    @Override
+    public void subscribeToSession(String conversationId, StreamObserver<TaskResponse> responseObserver) {
+        log.info("[Orchestrator] 收到订阅请求: convId={}", conversationId);
+
+        OrchestrationSession session = sessionManager.getSession(conversationId);
+        if (session == null) {
+            log.warn("[Orchestrator] 会话不存在，无法订阅: convId={}", conversationId);
+            responseObserver.onCompleted();
+            return;
+        }
+
+        // 检查会话状态
+        if (session.getStatus() == OrchestrationSession.SessionStatus.CANCELLED ||
+            session.getStatus() == OrchestrationSession.SessionStatus.FAILED) {
+            log.info("[Orchestrator] 会话已结束，无法订阅: convId={}, status={}",
+                    conversationId, session.getStatus());
+            responseObserver.onCompleted();
+            return;
+        }
+
+        // 添加订阅者
+        session.subscribe(event -> {
+            TaskResponse dto = TaskResponseConverter.toTaskResponse(event);
+            if (dto != null) {
+                responseObserver.onNext(dto);
+            }
+        });
+
+        log.info("[Orchestrator] 订阅成功: convId={}, subscribers={}",
+                conversationId, session.getSubscriberCount());
+
+        // 设置完成回调：当会话结束时自动完成流
+        // 注意：这里不会立即调用onCompleted，而是等待会话真正结束
+        // 会话结束时，OrchestrationSession会通知所有订阅者
     }
 
     // ========== 主会话管理 ==========
