@@ -326,11 +326,10 @@ public class AgentOrchestrator implements AgentExecutionService {
                 .mainTaskId("main-" + conversationId)
                 .currentAgentId(agentId)
                 .status(OrchestrationSession.SessionStatus.ACTIVE)
-                .eventConsumer(eventConsumer) // 保留旧字段兼容性
                 .build();
 
-        // 2. 将 eventConsumer 也添加为订阅者
-        session.subscribe(eventConsumer);
+        // 2. 注册 eventConsumer（不要添加到 subscribers，因为 sendEvent 会分别处理）
+        session.setEventConsumer(eventConsumer);
 
         // 3. 注册会话
         sessionManager.registerSession(session);

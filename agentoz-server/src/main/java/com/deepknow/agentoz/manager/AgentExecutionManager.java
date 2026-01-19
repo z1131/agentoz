@@ -49,7 +49,7 @@ public class AgentExecutionManager {
 
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
-    
+
 
     /**
      * 持久化 Codex 事件到会话历史

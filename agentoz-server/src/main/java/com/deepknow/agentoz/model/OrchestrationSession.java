@@ -253,6 +253,14 @@ public class OrchestrationSession {
     /**
      * 订阅事件流
      *
+     * <p>支持多订阅者（多页面场景）：
+     * <ul>
+     *   <li>页面A：SSE 连接活跃</li>
+     *   <li>页面B：刷新后重连，创建新的 SSE 连接</li>
+     *   <li>页面C：新开窗口，创建新的 SSE 连接</li>
+     * </ul>
+     * 所有订阅者都会收到相同的事件（广播模式）</p>
+     *
      * @param subscriber 事件消费者
      */
     public void subscribe(Consumer<com.deepknow.agentoz.dto.InternalCodexEvent> subscriber) {
@@ -261,6 +269,8 @@ public class OrchestrationSession {
             log.warn("🔧 [OrchestrationSession] subscribers 列表未初始化，重新初始化: sessionId={}", sessionId);
             subscribers = new java.util.concurrent.CopyOnWriteArrayList<>();
         }
+
+        // 不清空旧订阅者！直接添加新的（支持多页面）
         subscribers.add(subscriber);
         log.info("📡 [OrchestrationSession] 新订阅者: sessionId={}, subscribers={}",
                 sessionId, subscribers.size());
