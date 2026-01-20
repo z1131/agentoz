@@ -1,9 +1,9 @@
 name: Publish AgentOz Starter (SDK)
 
 on:
-  push:
-    branches: [main, master]
-  workflow_dispatch:
+  # push:
+  #   branches: [main, master]
+  workflow_dispatch:  # 保留手动触发
 
 jobs:
   publish:

@@ -1,14 +1,14 @@
 name: Deploy AgentOZ (Production)
 
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - '.github/workflows/deploy-agentoz.yml'
-      - 'agentoz-server/**'
-      - 'agentoz-api/**'
-      - 'pom.xml'
-  workflow_dispatch:
+  # push:
+  #   branches: [main, master]
+  #   paths:
+  #     - '.github/workflows/deploy-agentoz.yml'
+  #     - 'agentoz-server/**'
+  #     - 'agentoz-api/**'
+  #     - 'pom.xml'
+  workflow_dispatch:  # 保留手动触发
 
 permissions:
   contents: read
