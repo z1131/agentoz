@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 import os
 import logging
@@ -8,6 +8,18 @@ from app.core import engine
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 过滤无意义的扫描请求日志
+class ScannerFilter(logging.Filter):
+    IGNORE_PATHS = [
+        '/static/', '/_app/', '/_astro/', '/build/', '/dist/', 
+        '/public/', '/config/', '.js', '.mjs', '.config'
+    ]
+    def filter(self, record):
+        msg = record.getMessage()
+        return not any(p in msg for p in self.IGNORE_PATHS)
+
+logging.getLogger("uvicorn.access").addFilter(ScannerFilter())
 
 app = FastAPI(title="AgentOZ RAG Service")
 
