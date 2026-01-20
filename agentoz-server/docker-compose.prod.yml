@@ -1,20 +1,25 @@
 version: '3.8'
+
 services:
   agentoz:
     image: ${DOCKER_IMAGE}
     container_name: agentoz
-    restart: unless-stopped
-    env_file:
-      - /etc/deepknow.env
+    restart: always
     ports:
       - "8003:8003"
       - "20883:20883"
     environment:
-      TZ: Asia/Shanghai
-      JAVA_OPTS: "-Xms512m -Xmx1024m"
-      SERVER_PORT: 8003
-      SPRING_PROFILES_ACTIVE: "prod"
-      SLS_LOGSTORE: "agentoz"
-      DUBBO_IP_TO_REGISTRY: ${SERVICE_IP}
-    volumes:
-      - ./logs:/root/logs
+      - TZ=Asia/Shanghai
+      - SPRING_PROFILES_ACTIVE=prod
+      - SERVICE_IP=${SERVICE_IP}
+    networks:
+      - deepknow-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+networks:
+  deepknow-network:
+    external: true

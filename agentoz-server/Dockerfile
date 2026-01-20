@@ -8,7 +8,6 @@ COPY pom.xml .
 # 2. Copy modules
 COPY agentoz-api agentoz-api
 COPY agentoz-server agentoz-server
-COPY agentoz-starter agentoz-starter
 
 # 3. Build settings
 ARG GITHUB_ACTOR
@@ -35,8 +34,6 @@ RUN mkdir -p /root/.m2 && \
 EOF
 
 # 4. Build
-# 注意：不需要 mount secret，直接用 ARG 传入 token 更通用（或者您保持原有 secret 方式也可，但我先用通用写法）
-# 如果您的环境强依赖 secret挂载，请告诉我。这里我先用简单变量。
 RUN mvn clean package -DskipTests -pl agentoz-server -am -s /root/.m2/settings.xml
 
 # Stage 2: Run

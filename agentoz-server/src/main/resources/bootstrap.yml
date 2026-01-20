@@ -1,38 +1,20 @@
 spring:
   application:
-    name: agentoz
+    name: agentoz-server
   cloud:
     nacos:
-      config:
-        enabled: true
-        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
-        namespace: ${NACOS_NAMESPACE:public}
-        file-extension: yaml
+      discovery:
+        server-addr: ${NACOS_HOST:localhost}:${NACOS_PORT:8848}
         username: ${NACOS_USERNAME:nacos}
         password: ${NACOS_PASSWORD:nacos}
-        group: ${NACOS_GROUP:DEEPKNOW_GROUP}
+        namespace: ${NACOS_NAMESPACE:}
+      config:
+        server-addr: ${NACOS_HOST:localhost}:${NACOS_PORT:8848}
+        username: ${NACOS_USERNAME:nacos}
+        password: ${NACOS_PASSWORD:nacos}
+        namespace: ${NACOS_NAMESPACE:}
+        file-extension: yml
         shared-configs:
-          - dataId: common.yaml
-            group: ${NACOS_GROUP:DEEPKNOW_GROUP}
+          - data-id: common.yml
+            group: DEFAULT_GROUP
             refresh: true
-          - dataId: agentoz.yaml
-            group: ${NACOS_GROUP:DEEPKNOW_GROUP}
-            refresh: true
-
-dubbo:
-  application:
-    name: agentoz
-  protocol:
-    name: tri
-    port: 20883
-  registry:
-    address: nacos://${NACOS_SERVER_ADDR:127.0.0.1:8848}
-    group: ${NACOS_GROUP:DEEPKNOW_GROUP}
-    username: ${NACOS_USERNAME:nacos}
-    password: ${NACOS_PASSWORD:nacos}
-    parameters:
-      namespace: ${NACOS_NAMESPACE:public}
-  # 序列化安全配置 - 内部服务使用 PERMISSIVE 模式
-  serialization:
-    security:
-      mode: PERMISSIVE  # 允许所有 Protobuf 类型,避免 LazyStringArrayList 问题
