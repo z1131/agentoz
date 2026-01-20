@@ -101,8 +101,9 @@ class RAGEngine:
             logger.error(f"Tair connection failed: {e}")
             self.index = VectorStoreIndex.from_documents([])
 
-    def ingest_file(self, file_url: str, metadata: dict = None):
-        logger.info(f"Processing file: {file_url}")
+    def _extract_text(self, file_url: str) -> str:
+        """从文件 URL 提取文本内容"""
+        logger.info(f"Extracting text from: {file_url}")
         response = requests.get(file_url)
         if response.status_code != 200:
             raise Exception(f"Failed to download file: {file_url}")
@@ -122,13 +123,23 @@ class RAGEngine:
             full_text = self.ocr.image_to_text(file_content)
         else:
             full_text = file_content.decode('utf-8', errors='ignore')
+        
+        return full_text.strip()
 
-        if not full_text.strip():
-            return "No text extracted."
+    def parse_file(self, file_url: str) -> str:
+        """只解析文件，返回提取的文本，不入库"""
+        return self._extract_text(file_url)
+
+    def ingest_file(self, file_url: str, metadata: dict = None):
+        """解析文件并入库向量索引"""
+        full_text = self._extract_text(file_url)
+        
+        if not full_text:
+            return {"status": "empty", "extracted_text": "", "message": "No text extracted."}
 
         doc_obj = Document(text=full_text, metadata=metadata or {"source": file_url})
         self.index.insert(doc_obj)
-        return "Success"
+        return {"status": "success", "extracted_text": full_text, "message": "File indexed."}
 
     def query(self, query_text: str, top_k: int = 5):
         if not self.index: return []

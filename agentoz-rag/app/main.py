@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AgentOZ RAG Service")
 
+class ParseFileRequest(BaseModel):
+    file_url: str
+
 class IngestFileRequest(BaseModel):
     file_url: str
     metadata: dict = {}
@@ -23,14 +26,27 @@ class QueryRequest(BaseModel):
 def health_check():
     return {"status": "ok"}
 
+@app.post("/parse")
+async def parse_file(request: ParseFileRequest):
+    """
+    只解析文件，返回提取的文本，不入库向量索引
+    """
+    try:
+        text = engine.parse_file(request.file_url)
+        return {"status": "success", "extracted_text": text}
+    except Exception as e:
+        logger.error(f"Parse failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/ingest/file")
 async def ingest_file(request: IngestFileRequest):
     """
-    全能文件入库 (支持 PDF, Image, MD)
+    解析文件并入库向量索引 (支持 PDF, Image, MD)
+    返回提取的文本 + 入库状态
     """
     try:
-        engine.ingest_file(request.file_url, request.metadata)
-        return {"status": "success", "message": "File processed and indexed"}
+        result = engine.ingest_file(request.file_url, request.metadata)
+        return result
     except Exception as e:
         logger.error(f"Ingest failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
