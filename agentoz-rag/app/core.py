@@ -90,8 +90,6 @@ class RAGEngine:
             vector_store = TairVectorStore(
                 tair_url=tair_url,
                 index_name=INDEX_NAME,
-                dims=1536,
-                index_type="HNSW",
                 overwrite=False
             )
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
