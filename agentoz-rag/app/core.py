@@ -19,9 +19,9 @@ logger = logging.getLogger(__name__)
 # 🚀 快速上线硬编码配置区 (少爷请在此修改)
 # ============================================================
 TAIR_CONFIG = {
-    "host": "r-bp1q6kpm7rkdvivl5w.redis.rds.aliyuncs.com",
+    "host": "r-bp1q6kpm7rkdvivl5wpd.redis.rds.aliyuncs.com",
     "port": 6379,
-    "password": "Aa1231231212123", # 格式为 "username:password" 或 "password"
+    "password": "deepknow:Aa1231231212123",  # 格式为 "username:password"
     "db": 0
 }
 
